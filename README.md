@@ -10,9 +10,10 @@ Pure VBA. No dependencies. No silent schema drift.
 - [Introduction](#introduction)
 - [What This Solves](#what-this-solves)
 - [Core Capabilities](#core-capabilities)
+- [Real-World Performance](#real-world-performance---vba-json--excel-upsert-benchmark)
 - [Installation](#installation)
-  - [Option 1 — Copy Into Your Workbook (.txt)](#option-1--copy-into-your-workbook-txt)
-  - [Option 2 — Use the Provided Workbook (.xlsm)](#option-2--use-the-provided-workbook-xlsm)
+  - [Option 1 — Copy Into Your Workbook](#option-1--copy-into-your-workbook)
+  - [Option 2 — Use the Provided Workbook](#option-2--use-the-provided-workbook)
 - [Requirements](#requirements)
 - [Basic API Example](#basic-api-example)
   - [Refresh Mode](#refresh-mode)
@@ -130,7 +131,7 @@ ModernJsonInVBA supports two usage models:
 -   Copy the module into your own workbook (recommended)
 -   Use the provided `.xlsm` file directly
 
-### Option 1 --- Copy Into Your Workbook (.txt)
+### Option 1 — Copy Into Your Workbook
 
 1.  Download `ModernJsonInVBA.txt`
 2.  Open the file in a text editor
@@ -150,7 +151,7 @@ Module name:
 
 ------------------------------------------------------------------------
 
-### Option 2 --- Use the Provided Workbook (.xlsm)
+### Option 2 — Use the Provided Workbook
 
 1.  Download `ModernVBAJson_1.0.0.xlsm`
 2.  Open the file
