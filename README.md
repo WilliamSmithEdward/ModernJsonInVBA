@@ -87,12 +87,17 @@ No fallback tables.
 -   Convert JSON tables into 2D arrays
 -   Upsert Excel ListObjects deterministically
 -   Enforce strict schema contracts when required
+-   Emoji-Ready: Full support for non-BMP Unicode characters via surrogate pair parsing.
+-   Memory Efficient: Linear-time string processing designed for high-volume data.
+-   State-Machine Parsing: Handles nested arrays and objects to any depth without breaking.
 
 All implemented in pure VBA.
 
 -   No `Scripting.Dictionary`
 -   No COM references
 -   No external libraries
+
+Zero Dependencies: No need for Scripting.Dictionary or external DLLs. It’s pure, portable VBA.
 
 <pre>
 JSON Text
