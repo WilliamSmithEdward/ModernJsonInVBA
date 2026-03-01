@@ -120,6 +120,7 @@ Excel ListObject Upsert
 
 **Payload:** 55,040 bytes  
 **Rows:** 100  
+**Columns:** 15
 **Throughput:** **787.69 rows/sec**
 
 ## Installation
