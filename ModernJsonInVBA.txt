@@ -1,5 +1,14 @@
 Option Explicit
 
+Private Type RowKeyMap
+    cap As Long
+    slotHash() As Long
+    slotIdx() As Long          ' stores 1-based index into rowKeys/rowObjs
+    rowKeys() As String        ' 1-based
+    rowObjs() As Collection    ' 1-based
+    count As Long
+End Type
+
 ' =============================================================================
 ' Module:      zz_ModernJsonInVba
 ' Project:     ModernJsonInVBA
@@ -680,7 +689,7 @@ Public Function Json_IsObject(ByVal v As Variant) As Boolean
     Dim c As Collection
     Set c = v
 
-    If c.Count < 1 Then Exit Function
+    If c.count < 1 Then Exit Function
 
     If VarType(c(1)) = vbString Then
         Json_IsObject = (c(1) = TAG_OBJECT)
@@ -756,7 +765,7 @@ Private Function Json_StringifyArray(ByVal c As Collection) As String
     JS_AddPart parts, partCount, "["
 
     Dim i As Long
-    For i = 1 To c.Count
+    For i = 1 To c.count
         If i > 1 Then JS_AddPart parts, partCount, ","
         JS_AddPart parts, partCount, Json_Stringify(c(i))
     Next i
@@ -787,7 +796,7 @@ Private Function Json_StringifyObject(ByVal obj As Collection) As String
     first = True
 
     Dim i As Long
-    For i = 2 To obj.Count
+    For i = 2 To obj.count
         Dim pair As Variant
         pair = obj(i)
 
@@ -964,7 +973,7 @@ Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, B
         basePath = IIf(Len(prefix) = 0, "$", prefix)
 
         Dim i As Long
-        For i = 1 To arr.Count
+        For i = 1 To arr.count
             Dim idxPath As String
             idxPath = basePath & "[" & (i - 1) & "]"
 
@@ -990,7 +999,7 @@ Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, B
         Set obj = v
 
         Dim j As Long
-        For j = 2 To obj.Count
+        For j = 2 To obj.count
             Dim pair As Variant
             pair = obj(j)
 
@@ -1059,11 +1068,11 @@ End Function
 ' Purpose:
 '   Deterministic Variant assignment that preserves object references via Set.
 ' -----------------------------------------------------------------------------
-Private Sub VarAssign(ByRef dest As Variant, ByVal SRC As Variant)
-    If IsObject(SRC) Then
-        Set dest = SRC
+Private Sub VarAssign(ByRef dest As Variant, ByVal src As Variant)
+    If IsObject(src) Then
+        Set dest = src
     Else
-        dest = SRC
+        dest = src
     End If
 End Sub
 
@@ -1087,7 +1096,7 @@ Public Function Json_FlatGet(ByVal flatObj As Collection, ByVal path As String) 
     End If
 
     Dim i As Long
-    For i = 2 To flatObj.Count
+    For i = 2 To flatObj.count
         Dim pair As Variant
         pair = flatObj(i)
 
@@ -1117,7 +1126,7 @@ Public Function Json_FlatContains(ByVal flatObj As Collection, ByVal path As Str
     End If
 
     Dim i As Long
-    For i = 2 To flatObj.Count
+    For i = 2 To flatObj.count
         Dim pair As Variant
         pair = flatObj(i)
         If CStr(pair(0)) = path Then
@@ -1153,7 +1162,7 @@ Public Function Json_Unflatten(ByVal flatObj As Collection) As Collection
     root.Add TAG_OBJECT
 
     Dim i As Long
-    For i = 2 To flatObj.Count
+    For i = 2 To flatObj.count
         Dim pair As Variant
         pair = flatObj(i)
 
@@ -1204,11 +1213,11 @@ Private Sub Json_UnflattenInsert(ByVal root As Collection, ByVal path As String,
     Set current = root
 
     Dim i As Long
-    For i = 1 To tokens.Count
+    For i = 1 To tokens.count
         Dim key As String
         key = Json_UnescapePathSegment(CStr(tokens(i)))
 
-        If i = tokens.Count Then
+        If i = tokens.count Then
             Json_ObjSet current, key, value
         Else
             Dim child As Collection
@@ -1270,7 +1279,7 @@ End Function
 ' -----------------------------------------------------------------------------
 Private Function Json_FindOrCreateChild(ByVal parent As Collection, ByVal key As String) As Collection
     Dim i As Long
-    For i = 2 To parent.Count
+    For i = 2 To parent.count
         Dim pair As Variant
         pair = parent(i)
 
@@ -1317,36 +1326,38 @@ Private Function Json_UnescapePathSegment(ByVal s As String) As String
 End Function
 
 ' =============================================================================
-' Array-of-Object Root Discovery
+' Array-of-Object Root Discovery (O(n) expected, no quadratic unique scan)
 ' =============================================================================
 
-' -----------------------------------------------------------------------------
-' Json_FindArrayObjectRoots
-'
-' Purpose:
-'   From a flattened tagged object, collect unique root paths for arrays that
-'   are observed as arrays-of-objects.
-'
-' Rule:
-'   Detect any occurrence of <root>[n].<something> in a path.
-'
-' Returns:
-'   Collection of unique root paths as Strings.
-' Errors:
-'   vbObjectError + 910 flatObj not tagged object
-' -----------------------------------------------------------------------------
-Public Function Json_FindArrayObjectRoots(ByVal flatObj As Collection) As Collection
+Public Function Json_FindArrayObjectRoots( _
+    ByVal flatObj As Collection, _
+    Optional ByVal stopAfterFirst As Boolean = False _
+) As Collection
+
     If Not Json_IsObject(flatObj) Then
         Err.Raise vbObjectError + 910, ERR_SRC, "FindArrayObjectRoots expects tagged object"
     End If
 
     Dim roots As New Collection
 
+    Dim cap As Long
+    Dim slotHash() As Long
+    Dim slotIdx() As Long
+    cap = 0 ' lazy init
+
     Dim i As Long
-    For i = 2 To flatObj.Count
+    For i = 2 To flatObj.count
         Dim pair As Variant
         pair = flatObj(i)
-        Json_CollectArrayObjectRootsFromPath roots, CStr(pair(0))
+
+        Dim path As String
+        path = CStr(pair(0))
+
+        Json_CollectArrayObjectRootsFromPath_Fast roots, cap, slotHash, slotIdx, path, stopAfterFirst
+
+        If stopAfterFirst Then
+            If roots.count > 0 Then Exit For
+        End If
     Next i
 
     Set Json_FindArrayObjectRoots = roots
@@ -1459,79 +1470,11 @@ End Function
 ' -----------------------------------------------------------------------------
 Private Sub Json_AddUniqueString(ByVal c As Collection, ByVal s As String)
     Dim i As Long
-    For i = 1 To c.Count
+    For i = 1 To c.count
         If StrComp(CStr(c(i)), s, vbBinaryCompare) = 0 Then Exit Sub
     Next i
     c.Add s
 End Sub
-
-' =============================================================================
-' Table Extraction from Flattened JSON
-' =============================================================================
-
-' -----------------------------------------------------------------------------
-' Json_ExtractTableRows
-'
-' Purpose:
-'   For a flattened tagged object and a tableRoot representing an array-of-objects,
-'   return Collection of row objects (tagged objects). Row ordering aligns to index.
-'
-' Column rule:
-'   "$.orders[0].customer.name" -> column "customer.name"
-'
-' Exclusion:
-'   Any column path containing "[" is excluded (handled as child tables).
-'
-' Errors:
-'   vbObjectError + 920 flatObj not tagged object
-' -----------------------------------------------------------------------------
-Public Function Json_ExtractTableRows(ByVal flatObj As Collection, ByVal tableRoot As String) As Collection
-    If Not Json_IsObject(flatObj) Then
-        Err.Raise vbObjectError + 920, ERR_SRC, "ExtractTableRows expects tagged object"
-    End If
-
-    Dim rows As New Collection
-    Dim rowMap As New Collection ' pair(0)=rowKey, pair(1)=rowObj (Collection)
-
-    Dim i As Long
-    For i = 2 To flatObj.Count
-        Dim kv As Variant
-        kv = flatObj(i)
-
-        Dim path As String
-        path = CStr(kv(0))
-
-        Dim idx As Long
-        Dim colPath As String
-        Dim rowKey As String
-        Dim ok As Boolean
-
-        ' Fast path: index is immediately after tableRoot
-        ' Example: tableRoot="$.orders" path="$.orders[0].id"
-        If Left$(path, Len(tableRoot) + 1) = (tableRoot & "[") Then
-            ok = Json_TryParseIndexedPath(path, tableRoot, idx, colPath, rowKey)
-        Else
-            ' General path: allows parent indices between segments
-            ' Example: tableRoot="$.orders.items" path="$.orders[0].items[1].sku"
-            ok = Json_TryParseTableRowPath(path, tableRoot, idx, colPath, rowKey)
-        End If
-
-        If ok Then
-            ' Exclude nested arrays from parent table by design
-            If InStr(1, colPath, "[", vbBinaryCompare) = 0 Then
-                Dim rowObj As Collection
-                Set rowObj = Json_EnsureRowByKey(rows, rowMap, rowKey)
-
-                Dim v As Variant
-                VarAssign v, kv(1)
-
-                Json_ObjSet rowObj, colPath, v
-            End If
-        End If
-    Next i
-
-    Set Json_ExtractTableRows = rows
-End Function
 
 ' ---------------------------------------------------------------------------
 ' Json_TryParseIndexedPath
@@ -1630,13 +1573,13 @@ Private Function Json_TryParseTableRowPath( _
 
     Dim segs As Collection
     Set segs = Json_TokenizePath(rootRemainder)
-    If segs.Count = 0 Then Exit Function
+    If segs.count = 0 Then Exit Function
 
     Dim pos As Long
     pos = 3 ' right after "$." in fullPath
 
     Dim i As Long
-    For i = 1 To segs.Count
+    For i = 1 To segs.count
         Dim seg As String
         seg = CStr(segs(i))
 
@@ -1656,7 +1599,7 @@ Private Function Json_TryParseTableRowPath( _
                 If Len(idxText) = 0 Or Not Json_IsAllDigits(idxText) Then Exit Function
 
                 ' Only the final segment's bracket is the row index for THIS table.
-                If i = segs.Count Then
+                If i = segs.count Then
                     outIndex = CLng(idxText)
                 End If
 
@@ -1665,14 +1608,14 @@ Private Function Json_TryParseTableRowPath( _
                 ' No bracket:
                 ' - allowed for intermediate segments (object segments)
                 ' - NOT allowed for final segment because tableRoot points to an array root
-                If i = segs.Count Then Exit Function
+                If i = segs.count Then Exit Function
             End If
         Else
             Exit Function
         End If
 
         ' Between segments require "."
-        If i < segs.Count Then
+        If i < segs.count Then
             If pos > Len(fullPath) Then Exit Function
             If Mid$(fullPath, pos, 1) <> "." Then Exit Function
             pos = pos + 1
@@ -1715,7 +1658,7 @@ End Function
 ' ---------------------------------------------------------------------------
 Private Function Json_EnsureRowByKey(ByVal rows As Collection, ByVal rowMap As Collection, ByVal rowKey As String) As Collection
     Dim i As Long
-    For i = 1 To rowMap.Count
+    For i = 1 To rowMap.count
         Dim kv As Variant
         kv = rowMap(i)
         If StrComp(CStr(kv(0)), rowKey, vbBinaryCompare) = 0 Then
@@ -1746,7 +1689,7 @@ Private Function Json_EnsureRow(ByVal rows As Collection, ByVal idx As Long) As 
     Dim needCount As Long
     needCount = idx + 1
 
-    Do While rows.Count < needCount
+    Do While rows.count < needCount
         Dim o As New Collection
         o.Add TAG_OBJECT
         rows.Add o
@@ -1763,7 +1706,7 @@ End Function
 ' -----------------------------------------------------------------------------
 Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value As Variant)
     Dim i As Long
-    For i = 2 To obj.Count
+    For i = 2 To obj.count
         Dim pair As Variant
         pair = obj(i)
 
@@ -1778,7 +1721,7 @@ Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value
                 p(1) = value
             End If
 
-            If i <= obj.Count + 1 Then
+            If i <= obj.count + 1 Then
                 obj.Add p, , i
             Else
                 obj.Add p
@@ -1812,7 +1755,7 @@ Public Function Json_TableTo2D(ByVal rows As Collection, ByRef headers As Varian
     Const DBG As Boolean = False
 
     Dim rowCount As Long
-    rowCount = rows.Count
+    rowCount = rows.count
 
     If rowCount = 0 Then
         ReDim headers(1 To 1) As Variant
@@ -1843,7 +1786,7 @@ Public Function Json_TableTo2D(ByVal rows As Collection, ByRef headers As Varian
         Set rowObj = rows(r)
 
         Dim p As Long
-        For p = 2 To rowObj.Count
+        For p = 2 To rowObj.count
             Dim pair As Variant
             pair = rowObj(p)
 
@@ -1884,7 +1827,7 @@ Public Function Json_TableTo2D(ByVal rows As Collection, ByRef headers As Varian
         Set rowObj2 = rows(r)
 
         Dim p2 As Long
-        For p2 = 2 To rowObj2.Count
+        For p2 = 2 To rowObj2.count
             Dim pair2 As Variant
             pair2 = rowObj2(p2)
 
@@ -2318,13 +2261,13 @@ Public Sub Excel_ListObjectUpsertData( _
     existingHeaders = Excel_ListObjectHeadersTo1D(lo)
 
     Dim oldCols As Long
-    oldCols = lo.ListColumns.Count
+    oldCols = lo.ListColumns.count
 
     Dim oldBodyRows As Long
     If lo.DataBodyRange Is Nothing Then
         oldBodyRows = 0
     Else
-        oldBodyRows = lo.DataBodyRange.rows.Count
+        oldBodyRows = lo.DataBodyRange.rows.count
     End If
 
     Dim finalHeaders As Variant
@@ -2513,7 +2456,7 @@ End Function
 ' -----------------------------------------------------------------------------
 Private Function Excel_ListObjectHeadersTo1D(ByVal lo As ListObject) As Variant
     Dim n As Long
-    n = lo.ListColumns.Count
+    n = lo.ListColumns.count
 
     Dim arr As Variant
     ReDim arr(1 To n)
@@ -2581,7 +2524,7 @@ Private Function Excel_CollectionContainsText(ByVal c As Collection, ByVal s As 
     needle = Trim$(CStr(s))
 
     Dim i As Long
-    For i = 1 To c.Count
+    For i = 1 To c.count
         If StrComp(Trim$(CStr(c(i))), needle, vbTextCompare) = 0 Then
             Excel_CollectionContainsText = True
             Exit Function
@@ -2598,10 +2541,10 @@ End Function
 ' -----------------------------------------------------------------------------
 Private Function Excel_CollectionTo1D(ByVal c As Collection) As Variant
     Dim arr As Variant
-    ReDim arr(1 To c.Count)
+    ReDim arr(1 To c.count)
 
     Dim i As Long
-    For i = 1 To c.Count
+    For i = 1 To c.count
         arr(i) = CStr(c(i))
     Next i
 
@@ -2745,7 +2688,7 @@ Public Sub Excel_ResizeTableToRowCol( _
     ' --- Critical: force ListRows/DataBodyRange materialization ---
     If bodyRowCount > 0 Then
         Dim haveRows As Long
-        haveRows = lo.ListRows.Count
+        haveRows = lo.ListRows.count
 
         Dim need As Long
         need = bodyRowCount - haveRows
@@ -2903,7 +2846,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False _
 )
-    Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
+    Const src As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
     On Error GoTo Fail
 
@@ -2912,7 +2855,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
 
     ' Contract: root must be object or array
     If (Not IsObject(parsed)) Or (TypeName(parsed) <> "Collection") Then
-        Err.Raise vbObjectError + 1130, SRC, _
+        Err.Raise vbObjectError + 1130, src, _
             "JSON root must be an object or array (Collection). Primitive root is not supported for table upsert."
     End If
 
@@ -2921,7 +2864,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     ' -----------------------------
     Dim resolved As Variant
     If Not Json_TryResolvePath(parsed, tableRoot, resolved) Then
-        Err.Raise vbObjectError + 1160, SRC, _
+        Err.Raise vbObjectError + 1160, src, _
             "tableRoot not found: " & tableRoot
     End If
 
@@ -2933,7 +2876,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
             Or (TypeName(resolved) <> "Collection") _
             Or Json_IsObject(resolved) Then
 
-            Err.Raise vbObjectError + 1162, SRC, _
+            Err.Raise vbObjectError + 1162, src, _
                 "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
         End If
 
@@ -2942,7 +2885,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
         Set arr = resolved
 
         Dim i As Long
-        For i = 1 To arr.Count
+        For i = 1 To arr.count
             Dim elem As Variant
             VarAssign elem, arr(i)
 
@@ -2950,7 +2893,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
                 Or (TypeName(elem) <> "Collection") _
                 Or (Not Json_IsObject(elem)) Then
 
-                Err.Raise vbObjectError + 1163, SRC, _
+                Err.Raise vbObjectError + 1163, src, _
                     "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
             End If
         Next i
@@ -2969,7 +2912,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
 
     ' Preserve schema when shrinking with zero rows (existing behavior)
     If removeMissingColumns Then
-        If rows.Count = 0 Then
+        If rows.count = 0 Then
             Dim loExisting As ListObject
             Set loExisting = Excel_GetListObject(ws, tableName)
 
@@ -2997,12 +2940,12 @@ Fail:
     Dim s As String: s = Err.Source
 
     Err.Clear
-    If Len(s) > 0 And StrComp(s, SRC, vbBinaryCompare) <> 0 Then
+    If Len(s) > 0 And StrComp(s, src, vbBinaryCompare) <> 0 Then
         ' Optional: annotate inner source (keeps number deterministic; description changes slightly)
         d = d & " | inner_source=" & s
     End If
 
-    Err.Raise n, SRC, d
+    Err.Raise n, src, d
 End Sub
 
 ' =============================================================================
@@ -3095,7 +3038,7 @@ Private Function Json_TryResolvePath( _
 
             Dim oneBased As Long
             oneBased = idx + 1
-            If oneBased < 1 Or oneBased > arr.Count Then Exit Function
+            If oneBased < 1 Or oneBased > arr.count Then Exit Function
 
             Dim elem As Variant
             VarAssign elem, arr(oneBased)
@@ -3128,7 +3071,7 @@ Private Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, By
     VarAssign outValue, Null
 
     Dim i As Long
-    For i = 2 To obj.Count
+    For i = 2 To obj.count
         Dim pair As Variant
         pair = obj(i)
         If StrComp(CStr(pair(0)), key, vbBinaryCompare) = 0 Then
@@ -3209,7 +3152,7 @@ Private Sub Json_AssertArrayOfObjectsAtPath( _
     Set arr = resolved
 
     Dim i As Long
-    For i = 1 To arr.Count
+    For i = 1 To arr.count
         Dim elem As Variant
         VarAssign elem, arr(i)
 
@@ -3227,4 +3170,577 @@ Private Sub Json_AssertArrayOfObjectsAtPath( _
             Err.Raise vbObjectError + 1163, ERR_SRC, "Array element is not a tagged object at index " & (i - 1) & " for " & tableRoot
         End If
     Next i
+End Sub
+
+' -----------------------------------------------------------------------------
+' RowKeyMap_Init
+'
+' Purpose:
+'   Initialize the RowKeyMap structure used to map:
+'       rowKey (String) -> rowObj (Collection)
+'
+' Design:
+'   - Uses open addressing with linear probing.
+'   - Capacity is always a power of two to allow fast masking:
+'         pos = hash And (cap - 1)
+'   - slotHash/slotIdx form the hash table.
+'   - rowKeys/rowObjs store actual data in first-seen order.
+'
+' Determinism:
+'   - Row insertion order is preserved in rowKeys/rowObjs.
+'   - Hash table only accelerates lookup.
+'
+' initialCap:
+'   - Requested minimum capacity (will be rounded up to power-of-two).
+' -----------------------------------------------------------------------------
+Private Sub RowKeyMap_Init(ByRef m As RowKeyMap, Optional ByVal initialCap As Long = 64)
+
+    ' Ensure capacity is a power of two (required for mask-based indexing).
+    Dim capPow2 As Long
+    capPow2 = 1
+    Do While capPow2 < initialCap
+        capPow2 = capPow2 * 2
+    Loop
+
+    m.cap = capPow2
+
+    ' slotHash:
+    '   Stores 32-bit hash for quick equality check before string compare.
+    '
+    ' slotIdx:
+    '   Stores 1-based index into rowKeys/rowObjs arrays.
+    '   0 = empty slot.
+    ReDim m.slotHash(0 To m.cap - 1) As Long
+    ReDim m.slotIdx(0 To m.cap - 1) As Long
+
+    ' No rows inserted yet.
+    m.count = 0
+
+    ' Backing storage for actual row identity + object.
+    ' Grows dynamically as rows are added.
+    ReDim m.rowKeys(1 To 16) As String
+    ReDim m.rowObjs(1 To 16) As Collection
+
+End Sub
+
+
+' -----------------------------------------------------------------------------
+' RowKeyMap_Rehash
+'
+' Purpose:
+'   Grow the hash table to a larger capacity and reinsert all existing entries.
+'
+' Why:
+'   Open addressing performance degrades as load factor increases.
+'   We rehash when load factor exceeds ~70%.
+'
+' Determinism:
+'   Reinsertion occurs in existing row order (1..m.count),
+'   preserving row identity mapping.
+'
+' newCap:
+'   Desired minimum capacity (rounded up to power-of-two).
+' -----------------------------------------------------------------------------
+Private Sub RowKeyMap_Rehash(ByRef m As RowKeyMap, ByVal newCap As Long)
+
+    ' Round up to next power-of-two.
+    Dim capPow2 As Long
+    capPow2 = 1
+    Do While capPow2 < newCap
+        capPow2 = capPow2 * 2
+    Loop
+    newCap = capPow2
+
+    ' Allocate new hash slots.
+    Dim newHash() As Long
+    Dim newIdx() As Long
+    ReDim newHash(0 To newCap - 1) As Long
+    ReDim newIdx(0 To newCap - 1) As Long
+
+    Dim mask As Long
+    mask = newCap - 1   ' Used for fast modulo
+
+    ' Reinsert existing keys into new table.
+    Dim i As Long
+    For i = 1 To m.count
+
+        ' Recompute hash for key.
+        Dim h As Long
+        h = Json_Hash32_FNV1a(m.rowKeys(i))
+
+        Dim pos As Long
+        pos = (h And mask)
+
+        ' Linear probing until empty slot found.
+        Do
+            If newIdx(pos) = 0 Then
+                newHash(pos) = h
+                newIdx(pos) = i
+                Exit Do
+            End If
+            pos = (pos + 1) And mask
+        Loop
+
+    Next i
+
+    ' Replace old table with new one.
+    m.cap = newCap
+    m.slotHash = newHash
+    m.slotIdx = newIdx
+
+End Sub
+
+
+' -----------------------------------------------------------------------------
+' RowKeyMap_GetOrAdd
+'
+' Purpose:
+'   Lookup rowKey in the map.
+'
+'   If found:
+'       Return existing row object.
+'
+'   If not found:
+'       Create new row object (tagged with TAG_OBJECT),
+'       append to rows collection,
+'       insert into hash table,
+'       return new row object.
+'
+' Performance:
+'   Average O(1) lookup and insert.
+'   Uses FNV-1a 32-bit hash.
+'   Linear probing for collision resolution.
+'
+' Load Factor Policy:
+'   Rehash when (count + 1) / cap > 0.70
+'
+' Determinism:
+'   Row order is determined by first encounter.
+'   Hash table only accelerates lookup, not ordering.
+' -----------------------------------------------------------------------------
+Private Function RowKeyMap_GetOrAdd( _
+    ByRef m As RowKeyMap, _
+    ByVal rowKey As String, _
+    ByVal rows As Collection _
+) As Collection
+
+    ' Lazy initialization
+    If m.cap = 0 Then RowKeyMap_Init m, 64
+
+    ' Grow table if load factor would exceed ~70%.
+    If (m.count + 1) * 10 > m.cap * 7 Then
+        RowKeyMap_Rehash m, (m.cap * 2)
+    End If
+
+    ' Compute 32-bit hash for rowKey.
+    Dim h As Long
+    h = Json_Hash32_FNV1a(rowKey)
+
+    Dim mask As Long
+    mask = m.cap - 1
+
+    Dim pos As Long
+    pos = (h And mask)
+
+    Do
+        If m.slotIdx(pos) = 0 Then
+            ' -------------------------
+            ' INSERT NEW ROW
+            ' -------------------------
+
+            m.count = m.count + 1
+
+            ' Expand backing arrays if needed.
+            If m.count > UBound(m.rowKeys) Then
+                ReDim Preserve m.rowKeys(1 To UBound(m.rowKeys) * 2) As String
+                ReDim Preserve m.rowObjs(1 To UBound(m.rowObjs) * 2) As Collection
+            End If
+
+            ' Create new row object (tagged).
+            Dim o As New Collection
+            o.Add TAG_OBJECT
+            rows.Add o   ' Preserve row order
+
+            ' Store identity + object.
+            m.rowKeys(m.count) = rowKey
+            Set m.rowObjs(m.count) = o
+
+            ' Insert into hash table.
+            m.slotHash(pos) = h
+            m.slotIdx(pos) = m.count
+
+            Set RowKeyMap_GetOrAdd = o
+            Exit Function
+
+        Else
+            ' -------------------------
+            ' POSSIBLE MATCH
+            ' -------------------------
+            If m.slotHash(pos) = h Then
+                Dim idx As Long
+                idx = m.slotIdx(pos)
+
+                ' Full string compare to confirm equality.
+                If m.rowKeys(idx) = rowKey Then
+                    Set RowKeyMap_GetOrAdd = m.rowObjs(idx)
+                    Exit Function
+                End If
+            End If
+
+            ' Collision: probe next slot.
+            pos = (pos + 1) And mask
+        End If
+    Loop
+
+End Function
+
+' =============================================================================
+' Json_ExtractTableRows (compiled root, NO new Type)
+' =============================================================================
+Public Function Json_ExtractTableRows(ByVal flatObj As Collection, ByVal tableRoot As String) As Collection
+    If Not Json_IsObject(flatObj) Then
+        Err.Raise vbObjectError + 920, ERR_SRC, "ExtractTableRows expects tagged object"
+    End If
+
+    Dim rows As New Collection
+    Dim map As RowKeyMap
+
+    ' Compile tableRoot once (critical for nested roots performance)
+    Dim rootSegs() As String
+    Dim rootSegCount As Long
+    Json_BuildRootSegs tableRoot, rootSegs, rootSegCount
+
+    Dim i As Long
+    For i = 2 To flatObj.count
+        Dim kv As Variant
+        kv = flatObj(i)
+
+        Dim path As String
+        path = CStr(kv(0))
+
+        Dim idx As Long
+        Dim colPath As String
+        Dim rowKey As String
+        Dim ok As Boolean
+
+        Dim usedIndexedFastPath As Boolean
+        usedIndexedFastPath = False
+
+        ' Fast path: root is directly indexed right after tableRoot
+        If Left$(path, Len(tableRoot) + 1) = (tableRoot & "[") Then
+            ok = Json_TryParseIndexedPath(path, tableRoot, idx, colPath, rowKey)
+            usedIndexedFastPath = ok
+        Else
+            ' Compiled nested-root parser (no per-leaf tokenization)
+            ok = Json_TryParseTableRowPath_Compiled(path, tableRoot, rootSegs, rootSegCount, idx, colPath, rowKey)
+        End If
+
+        If ok Then
+            ' Exclude child-table columns
+            If InStr(1, colPath, "[", vbBinaryCompare) = 0 Then
+                Dim rowObj As Collection
+
+                If usedIndexedFastPath Then
+                    Set rowObj = Json_EnsureRow(rows, idx)
+                Else
+                    Set rowObj = RowKeyMap_GetOrAdd(map, rowKey, rows)
+                End If
+
+                Dim v As Variant
+                VarAssign v, kv(1)
+                Json_ObjSet rowObj, colPath, v
+            End If
+        End If
+    Next i
+
+    Set Json_ExtractTableRows = rows
+End Function
+
+' =============================================================================
+' Json_BuildRootSegs
+'   Builds compiled segments from "$.a.b.c" into rootSegs(1..n)
+' =============================================================================
+Private Sub Json_BuildRootSegs(ByVal tableRoot As String, ByRef rootSegs() As String, ByRef rootSegCount As Long)
+    rootSegCount = 0
+
+    tableRoot = Trim$(tableRoot)
+    If Len(tableRoot) = 0 Then Exit Sub
+    If Left$(tableRoot, 2) <> "$." Then Exit Sub
+
+    Dim remainder As String
+    remainder = Mid$(tableRoot, 3)
+
+    Dim toks As Collection
+    Set toks = Json_TokenizePath(remainder)
+    If toks.count = 0 Then Exit Sub
+
+    rootSegCount = toks.count
+    ReDim rootSegs(1 To rootSegCount) As String
+
+    Dim i As Long
+    For i = 1 To rootSegCount
+        rootSegs(i) = CStr(toks(i))
+    Next i
+End Sub
+
+' =============================================================================
+' Json_TryParseTableRowPath_Compiled
+'   Same semantics as your Json_TryParseTableRowPath, but uses compiled rootSegs.
+' =============================================================================
+Private Function Json_TryParseTableRowPath_Compiled( _
+    ByVal fullPath As String, _
+    ByVal tableRoot As String, _
+    ByRef rootSegs() As String, _
+    ByVal rootSegCount As Long, _
+    ByRef outIndex As Long, _
+    ByRef outColPath As String, _
+    ByRef outRowKey As String _
+) As Boolean
+
+    Json_TryParseTableRowPath_Compiled = False
+    outIndex = 0
+    outColPath = vbNullString
+    outRowKey = vbNullString
+
+    If rootSegCount = 0 Then Exit Function
+    If Len(fullPath) = 0 Or Len(tableRoot) = 0 Then Exit Function
+    If Left$(tableRoot, 2) <> "$." Then Exit Function
+    If Left$(fullPath, 2) <> "$." Then Exit Function
+
+    Dim pos As Long
+    pos = 3 ' after "$." in fullPath
+
+    Dim i As Long
+    For i = 1 To rootSegCount
+        Dim seg As String
+        seg = rootSegs(i)
+
+        ' Must match segment exactly at current pos
+        If Mid$(fullPath, pos, Len(seg)) <> seg Then Exit Function
+        pos = pos + Len(seg)
+
+        ' Optional [digits] after this segment
+        If pos <= Len(fullPath) Then
+            If Mid$(fullPath, pos, 1) = "[" Then
+                Dim closePos As Long
+                closePos = InStr(pos + 1, fullPath, "]")
+                If closePos = 0 Then Exit Function
+
+                Dim idxText As String
+                idxText = Mid$(fullPath, pos + 1, closePos - pos - 1)
+                If Len(idxText) = 0 Or Not Json_IsAllDigits(idxText) Then Exit Function
+
+                ' Only final segment bracket is row index for THIS table
+                If i = rootSegCount Then
+                    outIndex = CLng(idxText)
+                End If
+
+                pos = closePos + 1
+            Else
+                ' For final segment, bracket is required because tableRoot points at an array root
+                If i = rootSegCount Then Exit Function
+            End If
+        Else
+            Exit Function
+        End If
+
+        ' Between segments require "."
+        If i < rootSegCount Then
+            If pos > Len(fullPath) Then Exit Function
+            If Mid$(fullPath, pos, 1) <> "." Then Exit Function
+            pos = pos + 1
+        End If
+    Next i
+
+    ' Row identity includes all parent indices too
+    outRowKey = Left$(fullPath, pos - 1)
+
+    ' Remainder after rowKey
+    If pos > Len(fullPath) Then
+        outColPath = "value"
+        Json_TryParseTableRowPath_Compiled = True
+        Exit Function
+    End If
+
+    Dim remainder As String
+    remainder = Mid$(fullPath, pos)
+
+    If Len(remainder) = 0 Then
+        outColPath = "value"
+    ElseIf Left$(remainder, 1) = "." Then
+        outColPath = Mid$(remainder, 2)
+        If Len(outColPath) = 0 Then outColPath = "value"
+    Else
+        Exit Function
+    End If
+
+    Json_TryParseTableRowPath_Compiled = True
+End Function
+
+
+' =============================================================================
+' Roots hash-set (no UDT)
+'   - open addressing, linear probing
+'   - deterministic insertion order preserved in outRoots Collection
+' =============================================================================
+
+' =============================================================================
+' RootsSet: unique strings with open addressing (no UDT, no Dictionary)
+'   slotIdx(pos) = 0 means empty
+'   slotIdx(pos) = i means roots(i) is stored here
+' =============================================================================
+
+Private Sub RootsSet_Init(ByRef cap As Long, ByRef slotHash() As Long, ByRef slotIdx() As Long)
+    cap = 64
+    ReDim slotHash(0 To cap - 1) As Long
+    ReDim slotIdx(0 To cap - 1) As Long
+End Sub
+
+Private Sub RootsSet_Rehash( _
+    ByVal newCap As Long, _
+    ByRef cap As Long, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByVal roots As Collection _
+)
+    ' round up to power of two
+    Dim pow2 As Long
+    pow2 = 1
+    Do While pow2 < newCap
+        pow2 = pow2 * 2
+    Loop
+    newCap = pow2
+
+    Dim newHash() As Long
+    Dim newIdx() As Long
+    ReDim newHash(0 To newCap - 1) As Long
+    ReDim newIdx(0 To newCap - 1) As Long
+
+    Dim mask As Long
+    mask = newCap - 1
+
+    Dim i As Long
+    For i = 1 To roots.count
+        Dim s As String
+        s = CStr(roots(i))
+
+        Dim h As Long
+        h = Json_Hash32_FNV1a(s)
+
+        Dim pos As Long
+        pos = (h And mask)
+
+        Do
+            If newIdx(pos) = 0 Then
+                newHash(pos) = h
+                newIdx(pos) = i
+                Exit Do
+            End If
+            pos = (pos + 1) And mask
+        Loop
+    Next i
+
+    cap = newCap
+    slotHash = newHash
+    slotIdx = newIdx
+End Sub
+
+Private Sub RootsSet_AddIfMissing( _
+    ByVal s As String, _
+    ByRef cap As Long, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByVal roots As Collection _
+)
+    If cap = 0 Then RootsSet_Init cap, slotHash, slotIdx
+
+    ' grow when (count+1)/cap > ~0.70
+    If (roots.count + 1) * 10 > cap * 7 Then
+        RootsSet_Rehash cap * 2, cap, slotHash, slotIdx, roots
+    End If
+
+    Dim h As Long
+    h = Json_Hash32_FNV1a(s)
+
+    Dim mask As Long
+    mask = cap - 1
+
+    Dim pos As Long
+    pos = (h And mask)
+
+    Do
+        Dim existingIdx As Long
+        existingIdx = slotIdx(pos)
+
+        If existingIdx = 0 Then
+            ' insert new
+            roots.Add s
+            slotHash(pos) = h
+            slotIdx(pos) = roots.count
+            Exit Sub
+        End If
+
+        If slotHash(pos) = h Then
+            If CStr(roots(existingIdx)) = s Then
+                Exit Sub ' already present
+            End If
+        End If
+
+        pos = (pos + 1) And mask
+    Loop
+End Sub
+
+Private Sub Json_CollectArrayObjectRootsFromPath_Fast( _
+    ByVal roots As Collection, _
+    ByRef cap As Long, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByVal path As String, _
+    ByVal stopAfterFirst As Boolean _
+)
+    ' Very common case: root is an array-of-objects, paths look like:
+    '   "$[0].id"  -> root is "$"
+    If Len(path) >= 5 Then
+        If Mid$(path, 1, 2) = "$[" Then
+            ' verify it has "]." so it’s array element with object field
+            If InStr(3, path, "].", vbBinaryCompare) > 0 Then
+                RootsSet_AddIfMissing "$", cap, slotHash, slotIdx, roots
+                Exit Sub
+            End If
+        End If
+    End If
+
+    Dim p As Long
+    p = 1
+
+    Do
+        Dim openPos As Long
+        openPos = InStr(p, path, "[")
+        If openPos = 0 Then Exit Do
+
+        Dim closePos As Long
+        closePos = InStr(openPos + 1, path, "]")
+        If closePos = 0 Then Exit Do
+
+        ' must be "...[n]." shape
+        If closePos < Len(path) Then
+            If Mid$(path, closePos + 1, 1) = "." Then
+                Dim rootPath As String
+                rootPath = Left$(path, openPos - 1)
+
+                ' Only call RemoveIndices when the prefix actually contains indexes.
+                ' (On nested cases it does; on "$.x.y" it won’t.)
+                If InStr(1, rootPath, "[", vbBinaryCompare) > 0 Then
+                    rootPath = Json_RemoveIndices(rootPath)
+                End If
+
+                If Len(rootPath) > 0 Then
+                    RootsSet_AddIfMissing rootPath, cap, slotHash, slotIdx, roots
+                    If stopAfterFirst Then Exit Sub
+                End If
+            End If
+        End If
+
+        p = closePos + 1
+    Loop
 End Sub
