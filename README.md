@@ -43,6 +43,13 @@ The focus is control:
 Excel becomes a controlled data surface rather than a loosely
 interpreted one.
 
+See the .XLSM file for:
+
+-   Unit Tests
+-   Examples
+-   Performance Testing
+-   A Quick Start Module
+
 ------------------------------------------------------------------------
 
 ## What This Solves
