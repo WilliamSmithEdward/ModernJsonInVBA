@@ -108,6 +108,20 @@ Excel ListObject Upsert
 </pre>
 ------------------------------------------------------------------------
 
+## Real-World Performance - VBA JSON → Excel Upsert Benchmark
+
+| Stage   | Seconds  |
+|---------|----------|
+| HTTP    | 0.019531 |
+| Parse   | 0.015625 |
+| Write   | 0.000000 |
+| Upsert  | 0.091797 |
+| **Total** | **0.126953** |
+
+**Payload:** 55,040 bytes  
+**Rows:** 100  
+**Throughput:** **787.69 rows/sec**
+
 ## Installation
 
 ModernJsonInVBA supports two usage models:
