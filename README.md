@@ -5,6 +5,26 @@ Pure VBA. No dependencies. No silent schema drift.
 
 ------------------------------------------------------------------------
 
+## Contents
+
+- [Introduction](#introduction)
+- [What This Solves](#what-this-solves)
+- [Core Capabilities](#core-capabilities)
+- [Installation](#installation)
+  - [Option 1 — Copy Into Your Workbook (.txt)](#option-1--copy-into-your-workbook-txt)
+  - [Option 2 — Use the Provided Workbook (.xlsm)](#option-2--use-the-provided-workbook-xlsm)
+- [Requirements](#requirements)
+- [Basic API Example](#basic-api-example)
+  - [Refresh Mode](#refresh-mode)
+  - [Append Mode](#append-mode)
+  - [Strict Schema Mode](#strict-schema-mode)
+- [Understanding tableRoot](#understanding-tableroot)
+- [HTTP Helper (Windows)](#http-helper-windows)
+- [Schema Control](#schema-control)
+- [Deterministic Errors](#deterministic-errors)
+
+------------------------------------------------------------------------
+
 ## Introduction
 
 **ModernJsonInVBA** is a single-module JSON engine for structured Excel
