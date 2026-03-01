@@ -221,28 +221,6 @@ Excel_UpsertListObjectFromJsonAtRoot _
 
 ------------------------------------------------------------------------
 
-## Understanding `tableRoot`
-
-`tableRoot` defines which portion of the JSON becomes the Excel table.
-
-It must resolve to:
-
--   An array of objects
--   Or `null` (treated as zero rows)
-
-Anything else triggers a deterministic error.
-
-Supported path patterns:
-
--   `$`
--   `$.property`
--   `$.property.child`
--   `$.array[0].items`
-
-Zero-based indexing inside brackets.
-
-------------------------------------------------------------------------
-
 ### HTTP Helper (Windows)
 
 ``` vb
@@ -264,6 +242,28 @@ Private Function HttpGetText(ByVal url As String) As String
 
 End Function
 ```
+
+------------------------------------------------------------------------
+
+## Understanding `tableRoot`
+
+`tableRoot` defines which portion of the JSON becomes the Excel table.
+
+It must resolve to:
+
+-   An array of objects
+-   Or `null` (treated as zero rows)
+
+Anything else triggers a deterministic error.
+
+Supported path patterns:
+
+-   `$`
+-   `$.property`
+-   `$.property.child`
+-   `$.array[0].items`
+
+Zero-based indexing inside brackets.
 
 ------------------------------------------------------------------------
 
