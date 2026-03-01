@@ -1,6 +1,6 @@
 # ModernJsonInVBA
 
-Deterministic JSON → Excel Tables\
+Deterministic JSON → Excel Tables
 Pure VBA. No dependencies. No silent schema drift.
 
 ------------------------------------------------------------------------
@@ -15,9 +15,9 @@ predictable, repeatable behavior.
 
 The focus is control:
 
--   Explicit structural rules\
--   Intentional schema changes\
--   Deterministic failures\
+-   Explicit structural rules
+-   Intentional schema changes
+-   Deterministic failures
 -   No hidden behavior
 
 Excel becomes a controlled data surface rather than a loosely
@@ -29,41 +29,41 @@ interpreted one.
 
 Working with JSON in Excel commonly leads to:
 
--   Columns appearing in different orders\
--   Tables silently changing shape\
--   Layout drift over time\
--   Hidden external dependencies\
+-   Columns appearing in different orders
+-   Tables silently changing shape
+-   Layout drift over time
+-   Hidden external dependencies
 -   Fragile refresh logic
 
 ModernJsonInVBA eliminates those risks through:
 
--   Stable column discovery order\
--   Strict structural validation\
--   Explicit schema controls\
+-   Stable column discovery order
+-   Strict structural validation
+-   Explicit schema controls
 -   Deterministic error behavior
 
 When JSON structure does not match the declared `tableRoot`, execution
 stops with a clear, stable error.
 
-No guessing.\
+No guessing.
 No fallback tables.
 
 ------------------------------------------------------------------------
 
 ## Core Capabilities
 
--   Parse JSON into VBA Variants (objects, arrays, primitives)\
--   Convert VBA structures back into JSON\
--   Flatten and rebuild object graphs\
--   Discover array-of-object roots\
--   Convert JSON tables into 2D arrays\
--   Upsert Excel ListObjects deterministically\
+-   Parse JSON into VBA Variants (objects, arrays, primitives)
+-   Convert VBA structures back into JSON
+-   Flatten and rebuild object graphs
+-   Discover array-of-object roots
+-   Convert JSON tables into 2D arrays
+-   Upsert Excel ListObjects deterministically
 -   Enforce strict schema contracts when required
 
 All implemented in pure VBA.
 
--   No `Scripting.Dictionary`\
--   No COM references\
+-   No `Scripting.Dictionary`
+-   No COM references
 -   No external libraries
 
 <pre>
@@ -85,7 +85,7 @@ Excel ListObject Upsert
 
 ModernJsonInVBA supports two usage models:
 
--   Copy the module into your own workbook (recommended)\
+-   Copy the module into your own workbook (recommended)
 -   Use the provided `.xlsm` file directly
 
 ### Option 1 --- Copy Into Your Workbook (.txt)
@@ -120,8 +120,8 @@ You may copy the module into another workbook if needed.
 
 ## Requirements
 
--   Excel with VBA support (Windows and macOS)\
--   Macros enabled\
+-   Excel with VBA support (Windows and macOS)
+-   Macros enabled
 -   No external references required
 
 ------------------------------------------------------------------------
@@ -179,7 +179,7 @@ Excel_UpsertListObjectFromJsonAtRoot _
 
 It must resolve to:
 
--   An array of objects\
+-   An array of objects
 -   Or `null` (treated as zero rows)
 
 Anything else triggers a deterministic error.
@@ -231,8 +231,8 @@ Three switches govern update behavior:
 
     True, True, False
 
-Rows refresh.\
-New columns allowed.\
+Rows refresh.
+New columns allowed.
 Columns never disappear.
 
 ------------------------------------------------------------------------
@@ -251,7 +251,7 @@ Common cases:
 
 Errors protect against:
 
--   Silent schema drift\
--   Column collapse\
--   Partial table corruption\
+-   Silent schema drift
+-   Column collapse
+-   Partial table corruption
 -   Ambiguous data states
