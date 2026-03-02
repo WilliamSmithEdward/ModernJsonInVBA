@@ -246,6 +246,87 @@ End Function
 
 ------------------------------------------------------------------------
 
+## Excel to JSON (Reverse Materialization)
+
+ModernJsonInVBA is not only JSON to Excel.
+
+It also supports deterministic **Excel Table to JSON** conversion.
+
+This enables:
+
+- Exporting structured tables to APIs
+- Serializing curated Excel datasets
+- Creating reproducible JSON snapshots
+- Round-trip validation workflows
+
+### Function
+
+```vb
+Excel_ListObjectToJson(lo As ListObject, Optional includeBlanksAsNull As Boolean = False) As String
+```
+
+### Behavior
+
+- Each table row becomes a JSON object
+- Column order is preserved
+- Row order is preserved
+- Headers become property names
+- Nested paths supported via dot notation (`a.b.c`)
+- Literal dots supported via escape (`a\.b`)
+- Array index paths (`[0]`) are intentionally rejected (error 905)
+- Blank cells:
+  - Skipped by default (key omitted)
+  - Optional `includeBlanksAsNull=True` to emit explicit `null`
+
+### Example
+
+Given a table:
+
+| id | name    | active |
+|---:|---------|:------:|
+| 1  | Alice   | TRUE   |
+| 2  | Bob     | FALSE  |
+| 3  | Charlie | TRUE   |
+
+```vb
+Dim jsonText As String
+jsonText = Excel_ListObjectToJson(lo)
+```
+
+Produces:
+
+```json
+[
+  {"id":1,"name":"Alice","active":true},
+  {"id":2,"name":"Bob","active":false},
+  {"id":3,"name":"Charlie","active":true}
+]
+```
+
+### Determinism Guarantees
+
+- No silent type coercion
+- No hidden schema mutation
+- Excel errors (`#N/A`, etc.) trigger stable error 1170
+- Duplicate headers trigger 1121
+- Blank headers trigger 1120
+
+### Why This Matters
+
+Most VBA JSON libraries only parse JSON.
+
+ModernJsonInVBA supports **bidirectional structured transformation**:
+
+```text
+JSON Text
+   ↓
+Excel Table
+   ↓
+JSON Text
+```
+
+Excel becomes a structured JSON surface, not just a spreadsheet.
+
 ## Understanding `tableRoot`
 
 `tableRoot` defines which portion of the JSON becomes the Excel table.
