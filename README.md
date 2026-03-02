@@ -138,7 +138,7 @@ ModernJsonInVBA supports two usage models:
 
 ### Option 1 — Copy Into Your Workbook
 
-1.  Download `ModernJsonInVBA.txt`
+1.  Download `ModernJsonInVBA.vba`
 2.  Open the file in a text editor
 3.  Select all → Copy
 
