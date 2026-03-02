@@ -19,6 +19,7 @@ Pure VBA. No dependencies. No silent schema drift.
   - [Refresh Mode](#refresh-mode)
   - [Append Mode](#append-mode)
   - [Strict Schema Mode](#strict-schema-mode)
+- [Excel to JSON (Reverse Materialization)](#excel-to-json-reverse-materialization)
 - [Understanding tableRoot](#understanding-tableroot)
 - [HTTP Helper (Windows)](#http-helper-windows)
 - [Schema Control](#schema-control)
