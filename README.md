@@ -1,6 +1,6 @@
 # ModernJsonInVBA
 
-Deterministic JSON → Excel Tables
+Deterministic JSON → Excel Tables → JSON  
 Pure VBA. No dependencies. No silent schema drift.
 
 ------------------------------------------------------------------------
@@ -87,6 +87,7 @@ No fallback tables.
 -   Convert JSON tables into 2D arrays
 -   Upsert Excel ListObjects deterministically
 -   Enforce strict schema contracts when required
+-   Round trip json → list object → json
 -   Emoji-Ready: Full support for non-BMP Unicode characters via surrogate pair parsing.
 -   Memory Efficient: Linear-time string processing designed for high-volume data.
 -   State-Machine Parsing: Handles nested arrays and objects to any depth without breaking.
