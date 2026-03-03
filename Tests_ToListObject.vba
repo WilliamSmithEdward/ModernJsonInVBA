@@ -91,6 +91,13 @@ Public Sub RunAll_JsonExcelTests_StopOnFail()
     Test_TableToJson_RejectsArrayIndexHeaders_Throws_905
     Test_TableToJson_NestedPaths_And_EscapedDotKey
     Test_DeterministicHeaders_SparseObjects
+    Test_Refresh_PreservesFormulaColumns_WithAsserts
+    Test_Append_PreservesFormulaAndFillsDown_WithAsserts
+    Test_Refresh_PreservesFormulaColumn_AndFillsDown_WithAsserts
+    Test_Append_FillsFormulaDown_ForNewRows_WithAsserts
+    Test_Refresh_PreservesFormulaColumns_AndFillsDown_WithAsserts
+    Test_Append_AutoFillFormulaColumns_ForNewRows_WithAsserts
+    Test_Refresh_PreservesFormulaColumns_And_FillsDown_WithAsserts
     ' End Tests
 
     ' Cleanup (same safe backwards loop)
@@ -171,6 +178,44 @@ Private Sub AssertRowCount(ByVal lo As ListObject, ByVal expectedRows As Long, B
         actualRows = lo.DataBodyRange.rows.count
     End If
     AssertEquals expectedRows, actualRows, message
+End Sub
+
+Private Sub AssertBodyCellHasFormula( _
+    ByVal lo As ListObject, _
+    ByVal row1Based As Long, _
+    ByVal colName As String, _
+    ByVal message As String _
+)
+    Dim colIdx As Long
+    colIdx = lo.ListColumns(colName).Index
+
+    AssertTrue Not lo.DataBodyRange Is Nothing, message & " (no DataBodyRange)"
+    AssertTrue row1Based >= 1 And row1Based <= lo.DataBodyRange.rows.count, message & " (row out of range)"
+
+    Dim c As Range
+    Set c = lo.DataBodyRange.Cells(row1Based, colIdx)
+
+    AssertTrue c.HasFormula, message & " (expected formula, got none)"
+End Sub
+
+Private Sub AssertBodyCellFormulaR1C1Equals( _
+    ByVal lo As ListObject, _
+    ByVal row1Based As Long, _
+    ByVal colName As String, _
+    ByVal expectedR1C1 As String, _
+    ByVal message As String _
+)
+    Dim colIdx As Long
+    colIdx = lo.ListColumns(colName).Index
+
+    AssertTrue Not lo.DataBodyRange Is Nothing, message & " (no DataBodyRange)"
+    AssertTrue row1Based >= 1 And row1Based <= lo.DataBodyRange.rows.count, message & " (row out of range)"
+
+    Dim c As Range
+    Set c = lo.DataBodyRange.Cells(row1Based, colIdx)
+
+    AssertTrue c.HasFormula, message & " (expected formula, got none)"
+    AssertEquals expectedR1C1, c.FormulaR1C1, message & " (FormulaR1C1 mismatch)"
 End Sub
 
 ' =============================================================================
@@ -3202,4 +3247,674 @@ Fail:
     Dim d As String: d = Err.Description
     Err.Clear
     Err.Raise n, SRC, d
+End Sub
+
+
+' =============================================================================
+' TEST 39: Refresh (clearExisting=True) preserves formula columns
+'
+' Contract this test enforces:
+'   - If a column already contains formulas, a refresh write must not wipe them.
+'   - Data columns update, formula columns remain formulas after refresh.
+'
+' Notes:
+'   - Uses FormulaR1C1 with computed offsets for stability.
+' =============================================================================
+Public Sub Test_Refresh_PreservesFormulaColumns_WithAsserts()
+
+    Const SRC As String = "Test_Refresh_PreservesFormulaColumns_WithAsserts"
+
+    On Error GoTo Fail
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Refresh_PreserveFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: create base table with data cols + formula col
+    ' -----------------------------
+    Dim headersA As Variant
+    headersA = Array("qty", "unit price", "total")  ' note the space
+
+    Dim dataA As Variant
+    ReDim dataA(1 To 2, 1 To 3)
+    dataA(1, 1) = 2: dataA(1, 2) = 10: dataA(1, 3) = Empty
+    dataA(2, 1) = 3: dataA(2, 2) = 20: dataA(2, 3) = Empty
+
+    Excel_UpsertListObjectOnSheet ws, "tFormulas", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormulas")
+    AssertNotNothing lo, "tFormulas should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A row count"
+    AssertHeaderEquals lo, Array("qty", "unit price", "total"), "PASS A headers"
+
+    ' Set formula in "total" using stable R1C1 offsets
+    Dim qtyIdx As Long, unitIdx As Long, totalIdx As Long
+    qtyIdx = lo.ListColumns("qty").Index
+    unitIdx = lo.ListColumns("unit price").Index
+    totalIdx = lo.ListColumns("total").Index
+
+    Dim offQty As Long, offUnit As Long
+    offQty = qtyIdx - totalIdx
+    offUnit = unitIdx - totalIdx
+
+    Dim fR1C1 As String
+    fR1C1 = "=RC[" & CStr(offQty) & "]*RC[" & CStr(offUnit) & "]"
+
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = fR1C1
+
+    ' Sanity: formulas exist and compute
+    AssertBodyCellHasFormula lo, 1, "total", "PASS A total row1 has formula"
+    AssertBodyCellHasFormula lo, 2, "total", "PASS A total row2 has formula"
+    AssertEquals 20, lo.DataBodyRange.Cells(1, totalIdx).Value2, "PASS A total row1 value"
+    AssertEquals 60, lo.DataBodyRange.Cells(2, totalIdx).Value2, "PASS A total row2 value"
+
+    ' -----------------------------
+    ' PASS B: refresh (clearExisting=True) with new qty/unit values
+    ' -----------------------------
+    Dim headersB As Variant
+    headersB = Array("qty", "unit price")   ' incoming does not include "total"
+
+    Dim dataB As Variant
+    ReDim dataB(1 To 2, 1 To 2)
+    dataB(1, 1) = 5: dataB(1, 2) = 7
+    dataB(2, 1) = 4: dataB(2, 2) = 9
+
+    ' clearExisting=True, addMissingColumns=True keeps existing schema, should not destroy formulas
+    Excel_UpsertListObjectOnSheet ws, "tFormulas", ws.Range("A1"), headersB, dataB, True, True, False
+
+    Set lo = GetTable(ws, "tFormulas")
+    AssertNotNothing lo, "tFormulas should still exist after PASS B"
+    AssertHeaderEquals lo, Array("qty", "unit price", "total"), "PASS B headers preserved"
+    AssertRowCount lo, 2, "PASS B row count"
+
+    ' Formula must still exist after refresh
+    AssertBodyCellFormulaR1C1Equals lo, 1, "total", fR1C1, "PASS B total row1 formula preserved"
+    AssertBodyCellFormulaR1C1Equals lo, 2, "total", fR1C1, "PASS B total row2 formula preserved"
+
+    ' And it must recalc correctly with new inputs
+    totalIdx = lo.ListColumns("total").Index
+    AssertEquals 35, lo.DataBodyRange.Cells(1, totalIdx).Value2, "PASS B total row1 value"
+    AssertEquals 36, lo.DataBodyRange.Cells(2, totalIdx).Value2, "PASS B total row2 value"
+
+    Exit Sub
+
+Fail:
+    Dim n As Long: n = Err.Number
+    Dim d As String: d = Err.Description
+    Err.Clear
+    Err.Raise n, SRC, d
+
+End Sub
+
+
+' =============================================================================
+' TEST 40: Append mode preserves existing formula columns and auto-fills formulas
+'
+' Goal:
+'   - Create a table with a formula column ("total") based on data columns.
+'   - Append new JSON rows (clearExisting=False).
+'   - Verify:
+'       1) Existing formula cells remain formulas (not overwritten).
+'       2) New appended rows get the formula filled down automatically.
+'       3) Computed values are correct for both existing and appended rows.
+'
+' Notes:
+'   - We avoid setting Formula on a single DataBodyRange cell (can throw 1004).
+'   - We set the column's DataBodyRange formula in one shot AFTER seed rows exist.
+'   - We assert formulas via .FormulaR1C1 to avoid localized structured-ref quirks.
+' =============================================================================
+Public Sub Test_Append_PreservesFormulaAndFillsDown_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Append_PreserveFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: create base rows with [qty, unit_price]
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    ' Create table
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertNotNothing lo, "tFormAppend should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' -----------------------------
+    ' Add a formula column: "total" = qty * unit_price
+    ' We add a column at the end and fill formulas for existing rows.
+    ' -----------------------------
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    ' Fill the whole DataBodyRange of that column in one shot (safe)
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+
+    ' R1C1: total = RC[qty] * RC[unit_price]
+    ' qty is 2 cols left of total, unit_price is 1 col left of total
+    ' (because total was added at the end)
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    ' Assert computed values for existing rows
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+
+    ' Also assert formula exists for existing rows (R1C1)
+    Dim f1 As String, f2 As String
+    f1 = lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1
+    f2 = lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1
+    AssertEquals "=RC[-2]*RC[-1]", f1, "PASS A row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", f2, "PASS A row2 total formula"
+
+    ' -----------------------------
+    ' PASS B: append 2 more rows via JSON (clearExisting=False)
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    ' Append rows; schema union is fine (doesn't need to add columns here)
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersB, dataB, False, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertRowCount lo, 4, "PASS B rows should be 4 after append"
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers preserved"
+
+    ' Existing rows should still have formulas (not overwritten)
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS B row1 total formula preserved"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS B row2 total formula preserved"
+
+    ' New appended rows should have formula filled down automatically
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula filled"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(4, colTotal).FormulaR1C1, "PASS B row4 total formula filled"
+
+    ' Assert computed totals for appended rows
+    AssertBodyCellEquals lo, 3, "total", 28, "PASS B row3 total (4*7)"
+    AssertBodyCellEquals lo, 4, "total", 9, "PASS B row4 total (1*9)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 41: Refresh (clearExisting=True) preserves formula columns and refills down
+'
+' Goal:
+'   - Create a table with data columns + a formula column ("total").
+'   - Refresh/replace data using clearExisting=True (like a "ListObject refresh").
+'   - Verify:
+'       1) The formula column still exists after refresh.
+'       2) Formulas are present for all new rows (filled down).
+'       3) Computed values match the refreshed data.
+'
+' Notes:
+'   - We intentionally keep formula column OUT of incoming headers.
+'   - This test asserts the engine does NOT delete or overwrite formula columns
+'     when removeMissingColumns=False (default/typical refresh).
+' =============================================================================
+Public Sub Test_Refresh_PreservesFormulaColumn_AndFillsDown_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Refresh_PreserveFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: seed with 2 rows
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' -----------------------------
+    ' Add formula column "total" and fill it for existing rows
+    ' -----------------------------
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS A row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS A row2 total formula"
+
+    ' -----------------------------
+    ' PASS B: refresh/replace (clearExisting=True) with NEW rows
+    ' Incoming headers are still only [qty, unit_price]
+    ' removeMissingColumns=False => formula column must remain
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}," & _
+        "{""qty"":6,""unit_price"":2}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersB, dataB, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should still exist after PASS B"
+    AssertRowCount lo, 3, "PASS B rows should be 3 after refresh"
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers should preserve formula column"
+
+    ' Re-acquire total column index (safe)
+    colTotal = lo.ListColumns("total").Index
+
+    ' Formulas must be filled down for all rows
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS B row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS B row2 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula"
+
+    ' Computed totals
+    AssertBodyCellEquals lo, 1, "total", 28, "PASS B row1 total (4*7)"
+    AssertBodyCellEquals lo, 2, "total", 9, "PASS B row2 total (1*9)"
+    AssertBodyCellEquals lo, 3, "total", 12, "PASS B row3 total (6*2)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 42: Append mode fills formula down ONLY for newly appended rows
+'
+' Goal:
+'   - Create table with data columns + formula column ("total").
+'   - Append new rows using clearExisting=False.
+'   - Verify:
+'       1) Existing rows keep their formulas/values.
+'       2) Newly appended rows receive the formula (filled down).
+'       3) Computed values match expected results.
+'
+' Notes:
+'   - Incoming headers exclude the formula column.
+'   - This is the highest-value “append mode autofill” contract.
+' =============================================================================
+Public Sub Test_Append_FillsFormulaDown_ForNewRows_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Append_FillFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: seed with 2 rows
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertNotNothing lo, "tFormAppend should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' Add formula column "total"
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS A row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS A row2 total formula"
+
+    ' -----------------------------
+    ' PASS B: append 2 more rows
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    ' clearExisting := False => append
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersB, dataB, False, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertNotNothing lo, "tFormAppend should exist after PASS B"
+    AssertRowCount lo, 4, "PASS B rows should be 4 after append"
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers preserve formula column"
+
+    colTotal = lo.ListColumns("total").Index
+
+    ' Existing rows should remain correct
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS B row1 formula unchanged"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS B row2 formula unchanged"
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS B row1 total unchanged"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS B row2 total unchanged"
+
+    ' New rows must have formula filled down
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(4, colTotal).FormulaR1C1, "PASS B row4 total formula"
+
+    ' Computed totals
+    AssertBodyCellEquals lo, 3, "total", 28, "PASS B row3 total (4*7)"
+    AssertBodyCellEquals lo, 4, "total", 9, "PASS B row4 total (1*9)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 43: Refresh (clearExisting=True) preserves formulas in existing formula columns
+'
+' Goal:
+'   - Create table with data columns + formula column ("total").
+'   - Refresh (clearExisting=True) with new data rows.
+'   - Verify:
+'       1) Formula column remains present (schema union behavior).
+'       2) Formulas are present for ALL refreshed rows (filled down).
+'       3) Computed values match expected results.
+'
+' Notes:
+'   - Incoming headers exclude the formula column.
+'   - This validates the "preserve formulas on refresh" contract.
+' =============================================================================
+Public Sub Test_Refresh_PreservesFormulaColumns_AndFillsDown_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Refresh_PreserveFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: seed with 2 rows
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' Add formula column "total"
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+
+    ' -----------------------------
+    ' PASS B: refresh with 3 new rows (clearExisting=True)
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}," & _
+        "{""qty"":6,""unit_price"":2}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    ' clearExisting := True => refresh/replace body
+    ' addMissingColumns := True => keep existing columns (including formula col)
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersB, dataB, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should exist after PASS B"
+
+    ' Schema should preserve formula column
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers preserve formula column"
+    AssertRowCount lo, 3, "PASS B rows should be 3"
+
+    colTotal = lo.ListColumns("total").Index
+
+    ' Formula should exist for all refreshed rows
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS B row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS B row2 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula"
+
+    ' Computed totals
+    AssertBodyCellEquals lo, 1, "total", 28, "PASS B row1 total (4*7)"
+    AssertBodyCellEquals lo, 2, "total", 9, "PASS B row2 total (1*9)"
+    AssertBodyCellEquals lo, 3, "total", 12, "PASS B row3 total (6*2)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 44: Append mode auto-fills formulas down for newly appended rows
+'
+' Goal:
+'   - Create table with data columns + formula column ("total").
+'   - Append new rows (clearExisting=False).
+'   - Verify:
+'       1) Formula exists for appended rows (filled down).
+'       2) Computed values are correct for appended rows.
+'
+' Notes:
+'   - Incoming headers exclude the formula column.
+'   - This validates the "append autofill formulas" contract.
+' =============================================================================
+Public Sub Test_Append_AutoFillFormulaColumns_ForNewRows_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Append_AutoFillFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: seed with 2 rows
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertNotNothing lo, "tFormAppend should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' Add formula column "total"
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+
+    ' Seed formula for existing rows
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+
+    ' -----------------------------
+    ' PASS B: append 2 rows
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    ' clearExisting := False => append
+    ' addMissingColumns := True => schema can grow (not needed here), but preserves formula col
+    Excel_UpsertListObjectOnSheet ws, "tFormAppend", ws.Range("A1"), headersB, dataB, False, True, False
+
+    Set lo = GetTable(ws, "tFormAppend")
+    AssertNotNothing lo, "tFormAppend should exist after PASS B"
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers"
+    AssertRowCount lo, 4, "PASS B total rows should be 4"
+
+    colTotal = lo.ListColumns("total").Index
+
+    ' Formulas should exist for appended rows (rows 3 and 4)
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(4, colTotal).FormulaR1C1, "PASS B row4 total formula"
+
+    ' Computed totals for appended rows
+    AssertBodyCellEquals lo, 3, "total", 28, "PASS B row3 total (4*7)"
+    AssertBodyCellEquals lo, 4, "total", 9, "PASS B row4 total (1*9)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 45: Refresh (clearExisting=True) preserves formula columns + refills down
+'
+' Goal:
+'   - Create table with data columns + formula column.
+'   - Refresh (clearExisting=True) with a DIFFERENT row count.
+'   - Verify:
+'       1) Formula column is preserved (not overwritten by incoming headers).
+'       2) Formula is filled down for ALL refreshed rows.
+'       3) Computed values are correct after refresh.
+'
+' Notes:
+'   - Incoming headers exclude the formula column.
+'   - This validates the "refresh preserves formulas" contract.
+' =============================================================================
+Public Sub Test_Refresh_PreservesFormulaColumns_And_FillsDown_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Refresh_PreserveFormulas")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    ' -----------------------------
+    ' PASS A: seed with 2 rows
+    ' -----------------------------
+    Dim jsonA As String
+    jsonA = "[" & _
+        "{""qty"":2,""unit_price"":5}," & _
+        "{""qty"":3,""unit_price"":10}" & _
+    "]"
+
+    Dim headersA As Variant, dataA As Variant
+    Build2DFromJsonRoot jsonA, "$", headersA, dataA
+
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersA, dataA, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should exist after PASS A"
+    AssertRowCount lo, 2, "PASS A rows"
+    AssertHeaderEquals lo, Array("qty", "unit_price"), "PASS A headers"
+
+    ' Add formula column "total"
+    lo.ListColumns.Add
+    lo.ListColumns(lo.ListColumns.count).Name = "total"
+
+    Dim colTotal As Long
+    colTotal = lo.ListColumns("total").Index
+
+    ' Seed formula for existing rows
+    lo.ListColumns("total").DataBodyRange.FormulaR1C1 = "=RC[-2]*RC[-1]"
+
+    AssertBodyCellEquals lo, 1, "total", 10, "PASS A row1 total"
+    AssertBodyCellEquals lo, 2, "total", 30, "PASS A row2 total"
+
+    ' -----------------------------
+    ' PASS B: refresh with 3 rows (clearExisting=True)
+    ' -----------------------------
+    Dim jsonB As String
+    jsonB = "[" & _
+        "{""qty"":4,""unit_price"":7}," & _
+        "{""qty"":1,""unit_price"":9}," & _
+        "{""qty"":6,""unit_price"":2}" & _
+    "]"
+
+    Dim headersB As Variant, dataB As Variant
+    Build2DFromJsonRoot jsonB, "$", headersB, dataB
+
+    ' clearExisting := True => replace body
+    ' addMissingColumns := True => keep existing schema (including formula col)
+    ' removeMissingColumns := False
+    Excel_UpsertListObjectOnSheet ws, "tFormRefresh", ws.Range("A1"), headersB, dataB, True, True, False
+
+    Set lo = GetTable(ws, "tFormRefresh")
+    AssertNotNothing lo, "tFormRefresh should exist after PASS B"
+    AssertHeaderEquals lo, Array("qty", "unit_price", "total"), "PASS B headers preserve formula column"
+    AssertRowCount lo, 3, "PASS B rows should be 3"
+
+    colTotal = lo.ListColumns("total").Index
+
+    ' Formula should be present for all refreshed rows
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(1, colTotal).FormulaR1C1, "PASS B row1 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(2, colTotal).FormulaR1C1, "PASS B row2 total formula"
+    AssertEquals "=RC[-2]*RC[-1]", lo.DataBodyRange.Cells(3, colTotal).FormulaR1C1, "PASS B row3 total formula"
+
+    ' Computed totals after refresh
+    AssertBodyCellEquals lo, 1, "total", 28, "PASS B row1 total (4*7)"
+    AssertBodyCellEquals lo, 2, "total", 9, "PASS B row2 total (1*9)"
+    AssertBodyCellEquals lo, 3, "total", 12, "PASS B row3 total (6*2)"
+
 End Sub
