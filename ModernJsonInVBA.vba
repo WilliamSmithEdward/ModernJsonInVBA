@@ -674,14 +674,31 @@ End Function
 
 ' Write headers + data2D into lo with schema behavior controlled by flags.
 '
-' Flags:
+' Schema Flags:
 '   clearExisting:
 '     True  => clear previous body, resize to exactly newBodyRows, write
+'              Re-applies preserved formula columns down entire body.
 '     False => append new rows
+'              Preserved formula columns auto-fill into appended rows only.
+'
 '   addMissingColumns:
 '     True  => keep existing header order and append incoming headers not present
+'
 '   removeMissingColumns:
 '     True  => schema becomes exactly incoming headers
+'
+' Formula Behavior:
+'   preserveFormulaColumns (default True):
+'     Detect existing formula columns (by header name) before write.
+'     After write, formulas override incoming data for those columns.
+'
+'   fillFormulasOnAppend (default True):
+'     In append mode, formulas are applied only to newly appended rows.
+'
+' Determinism:
+'   - Header matching is case-insensitive.
+'   - First-found formula per column is used as template (R1C1).
+'   - Incoming data does not replace preserved formula columns.
 '
 ' Error:
 '   vbObjectError + 1101 removeMissingColumns=True requires clearExisting=True
@@ -691,7 +708,9 @@ Public Sub Excel_ListObjectUpsertData( _
     ByVal data2D As Variant, _
     Optional ByVal clearExisting As Boolean = True, _
     Optional ByVal addMissingColumns As Boolean = True, _
-    Optional ByVal removeMissingColumns As Boolean = False _
+    Optional ByVal removeMissingColumns As Boolean = False, _
+    Optional ByVal preserveFormulaColumns As Boolean = True, _
+    Optional ByVal fillFormulasOnAppend As Boolean = True _
 )
     If removeMissingColumns And (Not clearExisting) Then
         Err.Raise vbObjectError + 1101, "Excel_ListObjectUpsertData", _
@@ -711,6 +730,16 @@ Public Sub Excel_ListObjectUpsertData( _
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
+
+    ' Capture formula templates before any changes
+    Dim fHdrs() As String
+    Dim fFmls() As String
+    Dim fCount As Long
+    If preserveFormulaColumns Then
+        Excel_CaptureFormulaTemplates lo, fHdrs, fFmls, fCount
+    Else
+        fCount = 0
+    End If
 
     Dim existingHeaders As Variant
     existingHeaders = Excel_ListObjectHeadersTo1D(lo)
@@ -779,9 +808,15 @@ Public Sub Excel_ListObjectUpsertData( _
         If newBodyRows > 0 Then
             lo.DataBodyRange.Value2 = finalData
         End If
+
+        ' Re-apply formulas down full body after refresh
+        If preserveFormulaColumns And fCount > 0 Then
+            Excel_ApplyFormulasToBody lo, finalHeaders, newBodyRows, fHdrs, fFmls, fCount
+        End If
+
     Else
         Dim startRow As Long
-        startRow = oldBodyRows
+        startRow = oldBodyRows  ' 0-based offset into DataBodyRange
 
         If newCols <> oldCols Then
             Excel_ResizeTableToRowCol lo, finalHeaders, oldBodyRows
@@ -792,6 +827,11 @@ Public Sub Excel_ListObjectUpsertData( _
 
         If newBodyRows > 0 Then
             lo.DataBodyRange.Cells(startRow + 1, 1).Resize(newBodyRows, newCols).Value2 = finalData
+        End If
+
+        ' Fill formulas only into appended segment
+        If preserveFormulaColumns And fillFormulasOnAppend And fCount > 0 Then
+            Excel_ApplyFormulasToAppendedRows lo, finalHeaders, startRow, newBodyRows, fHdrs, fFmls, fCount
         End If
     End If
 
@@ -2997,3 +3037,150 @@ Public Function Excel_ListObjectToJson( _
     Excel_ListObjectToJson = Json_Stringify(arr)
 End Function
 
+' =============================================================================
+' Formula preservation for ListObject refresh/append
+'
+' Behavior:
+'   - Captures existing formula templates per header before any resize/clear.
+'   - After writing data:
+'       * clearExisting=True  => reapply formulas down entire body for those columns
+'       * clearExisting=False => apply formulas only to newly appended rows
+'
+' Notes:
+'   - "Formula column" is detected if ANY cell in that column has a formula.
+'     Template = first formula found scanning top-down.
+'   - Incoming data for a formula column is overwritten by the formula.
+'   - Deterministic: header match is case-insensitive; first-found formula wins.
+' =============================================================================
+
+Private Sub Excel_CaptureFormulaTemplates( _
+    ByVal lo As ListObject, _
+    ByRef outHdrs() As String, _
+    ByRef outFmlR1C1() As String, _
+    ByRef outCount As Long _
+)
+    outCount = 0
+    Erase outHdrs
+    Erase outFmlR1C1
+
+    If lo Is Nothing Then Exit Sub
+    If lo.ListColumns.count = 0 Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Dim c As Long
+    For c = 1 To lo.ListColumns.count
+        Dim colRng As Range
+        Set colRng = lo.DataBodyRange.Columns(c)
+
+        Dim f As String
+        If Excel_TryFindFirstFormulaR1C1(colRng, f) Then
+            outCount = outCount + 1
+            If outCount = 1 Then
+                ReDim outHdrs(1 To 8) As String
+                ReDim outFmlR1C1(1 To 8) As String
+            ElseIf outCount > UBound(outHdrs) Then
+                ReDim Preserve outHdrs(1 To UBound(outHdrs) * 2) As String
+                ReDim Preserve outFmlR1C1(1 To UBound(outFmlR1C1) * 2) As String
+            End If
+
+            outHdrs(outCount) = CStr(lo.ListColumns(c).Name)
+            outFmlR1C1(outCount) = f
+        End If
+    Next c
+End Sub
+
+Private Function Excel_TryFindFirstFormulaR1C1(ByVal colRng As Range, ByRef outFormulaR1C1 As String) As Boolean
+    Excel_TryFindFirstFormulaR1C1 = False
+    outFormulaR1C1 = vbNullString
+
+    If colRng Is Nothing Then Exit Function
+
+    Dim r As Long
+    For r = 1 To colRng.rows.count
+        Dim cell As Range
+        Set cell = colRng.Cells(r, 1)
+
+        If cell.HasFormula Then
+            outFormulaR1C1 = cell.FormulaR1C1
+            Excel_TryFindFirstFormulaR1C1 = (Len(outFormulaR1C1) > 0)
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Function Excel_TryGetFormulaForHeader( _
+    ByRef fHdrs() As String, _
+    ByRef fFmls() As String, _
+    ByVal fCount As Long, _
+    ByVal headerName As String, _
+    ByRef outFormulaR1C1 As String _
+) As Boolean
+    Excel_TryGetFormulaForHeader = False
+    outFormulaR1C1 = vbNullString
+
+    If fCount <= 0 Then Exit Function
+
+    Dim i As Long
+    For i = 1 To fCount
+        If StrComp(fHdrs(i), headerName, vbTextCompare) = 0 Then
+            outFormulaR1C1 = fFmls(i)
+            Excel_TryGetFormulaForHeader = (Len(outFormulaR1C1) > 0)
+            Exit Function
+        End If
+    Next i
+End Function
+
+Private Sub Excel_ApplyFormulasToBody( _
+    ByVal lo As ListObject, _
+    ByRef finalHeaders As Variant, _
+    ByVal bodyRowCount As Long, _
+    ByRef fHdrs() As String, _
+    ByRef fFmls() As String, _
+    ByVal fCount As Long _
+)
+    If lo Is Nothing Then Exit Sub
+    If bodyRowCount <= 0 Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Dim newCols As Long
+    newCols = (UBound(finalHeaders) - LBound(finalHeaders) + 1)
+
+    Dim c As Long
+    For c = 1 To newCols
+        Dim h As String
+        h = CStr(finalHeaders(LBound(finalHeaders) + c - 1))
+
+        Dim f As String
+        If Excel_TryGetFormulaForHeader(fHdrs, fFmls, fCount, h, f) Then
+            lo.DataBodyRange.Columns(c).FormulaR1C1 = f
+        End If
+    Next c
+End Sub
+
+Private Sub Excel_ApplyFormulasToAppendedRows( _
+    ByVal lo As ListObject, _
+    ByRef finalHeaders As Variant, _
+    ByVal startRowZeroBased As Long, _
+    ByVal appendedRowCount As Long, _
+    ByRef fHdrs() As String, _
+    ByRef fFmls() As String, _
+    ByVal fCount As Long _
+)
+    If lo Is Nothing Then Exit Sub
+    If appendedRowCount <= 0 Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Dim newCols As Long
+    newCols = (UBound(finalHeaders) - LBound(finalHeaders) + 1)
+
+    Dim c As Long
+    For c = 1 To newCols
+        Dim h As String
+        h = CStr(finalHeaders(LBound(finalHeaders) + c - 1))
+
+        Dim f As String
+        If Excel_TryGetFormulaForHeader(fHdrs, fFmls, fCount, h, f) Then
+            lo.DataBodyRange.Cells(startRowZeroBased + 1, c).Resize(appendedRowCount, 1).FormulaR1C1 = f
+        End If
+    Next c
+End Sub
