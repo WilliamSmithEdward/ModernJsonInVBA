@@ -861,7 +861,9 @@ Public Sub Excel_UpsertListObjectOnSheet( _
     ByVal data2D As Variant, _
     Optional ByVal clearExisting As Boolean = True, _
     Optional ByVal addMissingColumns As Boolean = True, _
-    Optional ByVal removeMissingColumns As Boolean = False _
+    Optional ByVal removeMissingColumns As Boolean = False, _
+    Optional ByVal preserveFormulaColumns As Boolean = True, _
+    Optional ByVal fillFormulasOnAppend As Boolean = True _
 )
     Dim lo As ListObject
     Set lo = Excel_GetListObject(ws, tableName)
@@ -870,7 +872,9 @@ Public Sub Excel_UpsertListObjectOnSheet( _
         Set lo = Excel_EnsureListObject(ws, tableName, topLeft, headers)
     End If
 
-    Excel_ListObjectUpsertData lo, headers, data2D, clearExisting, addMissingColumns, removeMissingColumns
+    Excel_ListObjectUpsertData lo, headers, data2D, _
+        clearExisting, addMissingColumns, removeMissingColumns, _
+        preserveFormulaColumns, fillFormulasOnAppend
 End Sub
 
 ' Resize table to:
@@ -950,7 +954,9 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal tableRoot As String, _
     Optional ByVal clearExisting As Boolean = True, _
     Optional ByVal addMissingColumns As Boolean = True, _
-    Optional ByVal removeMissingColumns As Boolean = False _
+    Optional ByVal removeMissingColumns As Boolean = False, _
+    Optional ByVal preserveFormulaColumns As Boolean = True, _
+    Optional ByVal fillFormulasOnAppend As Boolean = True _
 )
     Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
@@ -1023,7 +1029,8 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
 
     Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
         headersOut, data2D, _
-        clearExisting, addMissingColumns, removeMissingColumns
+        clearExisting, addMissingColumns, removeMissingColumns, _
+        preserveFormulaColumns, fillFormulasOnAppend
 
     Exit Sub
 
