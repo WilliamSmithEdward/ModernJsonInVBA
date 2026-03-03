@@ -190,7 +190,7 @@ This endpoint returns a root array. `tableRoot` is `$`.
 Public Sub Example_Api_Refresh()
 
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Worksheets("Sheet1")
+    Set ws = ThisWorkbook.Sheets("Quick Start")
 
     Dim jsonText As String
     jsonText = HttpGetText("https://jsonplaceholder.typicode.com/users")
@@ -198,7 +198,12 @@ Public Sub Example_Api_Refresh()
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers", ws.Range("A1"), _
         jsonText, "$", _
-        True, True, False
+        True, True, False, True
+    
+    Excel_UpsertListObjectFromJsonAtRoot _
+        ws, "tUsers2", ws.Range("A15"), _
+        jsonText, "$", _
+        False, True, False, True, False
 
 End Sub
 ```
