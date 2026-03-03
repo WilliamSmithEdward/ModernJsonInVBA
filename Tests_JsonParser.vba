@@ -1,25 +1,6 @@
 Option Explicit
 
 ' =============================================================================
-' mJsonTests
-' -----------------------------------------------------------------------------
-' Purpose
-'   Lightweight, zero-dependency test harness for mJsonOneFile JSON library.
-'
-' Usage
-'   Run: Json_RunAllTests
-'
-' Conventions
-'   - Each test is a single Sub named Test_<Area>_<Scenario>
-'   - Each test has a doc header describing:
-'       * Goal
-'       * Input
-'       * Expected result
-'       * Notes / known limitations
-'   - Assertions throw a consistent error number range (vbObjectError + 610+)
-' =============================================================================
-
-' =============================================================================
 ' PUBLIC RUNNER
 ' =============================================================================
 
