@@ -121,15 +121,15 @@ Excel ListObject Upsert
 | Stage   | Seconds  |
 |---------|----------|
 | HTTP    | 0.019531 |
-| Parse   | 0.015625 |
+| Parse   | 0.011719 |
 | Write   | 0.000000 |
-| Upsert  | 0.091797 |
-| **Total** | **0.126953** |
+| Upsert  | 0.015625 |
+| **Total** | **0.046875** |
 
 **Payload:** 55,040 bytes  
 **Rows:** 100  
 **Columns:** 15  
-**Throughput:** **787.69 rows/sec**
+**Throughput:** **2133.33 rows/sec**
 
 ## Installation
 
