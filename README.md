@@ -195,11 +195,13 @@ Public Sub Example_Api_Refresh()
     Dim jsonText As String
     jsonText = HttpGetText("https://jsonplaceholder.typicode.com/users")
 
+    'Clear existing values, add missing columns from JSON, preserve columns not found in JSON, preserve existing formulas
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers", ws.Range("A1"), _
         jsonText, "$", _
         True, True, False, True
     
+    'Preserve existing values, append new values from JSON, ignore missing columns from JSON, preserve columns not found in JSON, preserve existing formulas, don't add formulas to newly appended data
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers2", ws.Range("A15"), _
         jsonText, "$", _
