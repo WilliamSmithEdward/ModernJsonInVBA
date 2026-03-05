@@ -19,6 +19,7 @@ Pure VBA. No dependencies. No silent schema drift.
   - [Refresh Mode](#refresh-mode)
   - [Append Mode](#append-mode)
   - [Strict Schema Mode](#strict-schema-mode)
+- [Accessing Json Elements (Directly in VBA)](#accessing-json-elements-directly-in-vba)
 - [Excel_UpsertListObjectFromJsonAtRoot](#excel_upsertlistobjectfromjsonatroot)
 - [Excel to JSON (Reverse Materialization)](#excel-to-json-reverse-materialization)
 - [Understanding tableRoot](#understanding-tableroot)
@@ -251,6 +252,196 @@ Private Function HttpGetText(ByVal url As String) As String
     HttpGetText = CStr(http.responseText)
 
 End Function
+```
+
+------------------------------------------------------------------------
+
+## Accessing Json Elements (Directly in VBA)
+
+```vba
+' =============================================================================
+' Example_ReadValuesFromJson
+'
+' Purpose
+'   Demonstrates how to extract values from JSON using the ModernJsonInVBA library.
+'
+' What this example shows
+'   1) Parse JSON text into an in-memory structure
+'   2) Access top-level values
+'   3) Access nested values
+'   4) Iterate arrays
+'   5) Read properties from objects
+'
+' Important idea
+'   JSON contains three main structures:
+'
+'       Object  -> { key : value }
+'       Array   -> [ value, value, value ]
+'       Value   -> text, number, true/false, or null
+'
+'   In this library:
+'
+'       JSON Object  -> VBA Collection (tagged internally)
+'       JSON Array   -> VBA Collection
+'       Values       -> normal VBA types (String, Double, Boolean, etc.)
+'
+' =============================================================================
+Public Sub Example_ReadValuesFromJson()
+
+    ' ------------------------------------------------------------
+    ' Step 1 — Create some example JSON
+    ' (Normally this would come from an API response)
+    ' ------------------------------------------------------------
+    
+    Dim jsonText As String
+    
+    jsonText = "{"
+    jsonText = jsonText & """orders"":["
+    
+    jsonText = jsonText & "{"
+    jsonText = jsonText & """orderId"":""A100"","
+    jsonText = jsonText & """customer"":{""id"":""C01"",""name"":""Ada""},"
+    jsonText = jsonText & """status"":""open"","
+    jsonText = jsonText & """items"":["
+    
+    jsonText = jsonText & "{""sku"":""SKU-1"",""qty"":2,""price"":9.99,""promos"":[""P10"",""P20""]},"
+    jsonText = jsonText & "{""sku"":""SKU-2"",""qty"":1,""price"":19.5,""promos"":[]}"
+    
+    jsonText = jsonText & "]"
+    jsonText = jsonText & "},"
+    
+    jsonText = jsonText & "{"
+    jsonText = jsonText & """orderId"":""A101"","
+    jsonText = jsonText & """customer"":{""id"":""C02"",""name"":""Grace""},"
+    jsonText = jsonText & """status"":""shipped"","
+    jsonText = jsonText & """items"":["
+    
+    jsonText = jsonText & "{""sku"":""SKU-3"",""qty"":4,""price"":2.5,""promos"":[""P5""]}"
+    
+    jsonText = jsonText & "]"
+    jsonText = jsonText & "}"
+    
+    jsonText = jsonText & "]"
+    jsonText = jsonText & "}"
+    
+    
+    ' ------------------------------------------------------------
+    ' Step 2 — Parse the JSON text
+    '
+    ' Json_ParseInto converts the JSON string into an in-memory
+    ' structure that VBA can navigate.
+    ' ------------------------------------------------------------
+    
+    Dim root As Variant
+    Json_ParseInto jsonText, root
+    
+    
+    ' ------------------------------------------------------------
+    ' Step 3 — Access a value using a JSON path
+    '
+    ' "$.orders[0].orderId"
+    ' means:
+    '
+    ' root
+    '   -> orders array
+    '       -> first element
+    '           -> orderId property
+    ' ------------------------------------------------------------
+    
+    Dim orderIdV As Variant
+    
+    If Json_TryResolvePath(root, "$.orders[0].orderId", orderIdV) Then
+        Debug.Print "First orderId:", orderIdV
+    End If
+    
+    
+    ' ------------------------------------------------------------
+    ' Step 4 — Access nested values
+    ' ------------------------------------------------------------
+    
+    Dim custName As Variant
+    
+    Json_TryResolvePath root, "$.orders[1].customer.name", custName
+    
+    Debug.Print "Second order customer:", custName
+    
+    
+    ' ------------------------------------------------------------
+    ' Step 5 — Extract the orders array
+    '
+    ' Arrays are represented as VBA Collections
+    ' ------------------------------------------------------------
+    
+    Dim ordersV As Variant
+    
+    Json_TryResolvePath root, "$.orders", ordersV
+    
+    Dim orders As Collection
+    Set orders = ordersV
+    
+    
+    ' ------------------------------------------------------------
+    ' Step 6 — Loop through each order
+    ' ------------------------------------------------------------
+    
+    Dim orderObj As Collection
+    
+    For Each orderObj In orders
+        
+        Dim idV As Variant
+        Json_TryObjGet orderObj, "orderId", idV
+        
+        Debug.Print "Order:", idV
+        
+        
+        ' --------------------------------------------------------
+        ' Step 7 — Access the items array inside each order
+        ' --------------------------------------------------------
+        
+        Dim itemsV As Variant
+        
+        If Json_TryObjGet(orderObj, "items", itemsV) Then
+            
+            Dim items As Collection
+            Set items = itemsV
+            
+            Dim itemObj As Collection
+            
+            For Each itemObj In items
+                
+                Dim skuV As Variant
+                Json_TryObjGet itemObj, "sku", skuV
+                
+                Debug.Print "  SKU:", skuV
+                
+                
+                ' ------------------------------------------------
+                ' Step 8 — Access the promo codes array
+                ' ------------------------------------------------
+                
+                Dim promosV As Variant
+                
+                If Json_TryObjGet(itemObj, "promos", promosV) Then
+                    
+                    Dim promos As Collection
+                    Set promos = promosV
+                    
+                    Dim promo As Variant
+                    
+                    For Each promo In promos
+                        Debug.Print "    Promo:", promo
+                    Next promo
+                    
+                End If
+                
+            Next itemObj
+            
+        End If
+        
+    Next orderObj
+    
+    
+End Sub
 ```
 
 ------------------------------------------------------------------------
