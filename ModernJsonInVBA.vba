@@ -3094,7 +3094,87 @@ Public Function Json_TryReadBracketIndex(ByVal path As String, ByRef i As Long, 
     Json_TryReadBracketIndex = True
 End Function
 
-
+' =============================================================================
+' Excel_ListObjectToJson
+' =============================================================================
+' Converts an Excel ListObject (table) into a JSON array-of-objects.
+'
+' Each row of the table becomes a JSON object. Column headers define the JSON
+' property paths, and values are taken from DataBodyRange.Value2. Nested object
+' paths using dotted notation (e.g. "customer.name") are supported.
+'
+' Array index paths (e.g. "items[0].sku") are intentionally NOT supported
+' because Json_Unflatten does not reconstruct arrays from indexed paths.
+'
+' -----------------------------------------------------------------------------
+' PARAMETERS
+' -----------------------------------------------------------------------------
+' lo
+'   The source ListObject (Excel table). Column headers are used as JSON keys.
+'
+' includeBlanksAsNull (Optional, default False)
+'   Controls how blank cells are handled.
+'
+'   False  -> Blank cells are omitted from the JSON object (key not present).
+'   True   -> Blank cells are written as JSON null.
+'
+' parseJsonInCells (Optional, default False)
+'   If True, cell text that appears to contain JSON is parsed and embedded as
+'   a JSON object or array rather than serialized as a string.
+'
+'   Only parsed values that produce JSON arrays or objects are embedded.
+'   Primitive results (number/string/true/false/null) are left as literal cell
+'   values to avoid surprising coercion.
+'
+' parseArraysOnly (Optional, default False)
+'   Applies only when parseJsonInCells = True.
+'
+'   True   -> Only JSON arrays ("[ ... ]") are parsed from cells.
+'   False  -> Both arrays ("[ ... ]") and objects ("{ ... }") are parsed.
+'
+' -----------------------------------------------------------------------------
+' RETURNS
+' -----------------------------------------------------------------------------
+' String
+'   A JSON array of objects representing the rows of the ListObject.
+'
+'   Example output:
+'
+'   [
+'     {"id":1,"name":"A"},
+'     {"id":2,"name":"B"}
+'   ]
+'
+' -----------------------------------------------------------------------------
+' BEHAVIOR
+' -----------------------------------------------------------------------------
+' • Header order is deterministic and preserved in the output JSON.
+' • Header names must be non-blank and unique (case-insensitive).
+' • Nested object paths using dot notation are supported.
+' • Blank handling is controlled by includeBlanksAsNull.
+' • Excel error values (e.g. #N/A, #VALUE!) raise an error.
+' • JSON-looking cell text may optionally be parsed into arrays/objects.
+'
+' -----------------------------------------------------------------------------
+' ERROR CONDITIONS
+' -----------------------------------------------------------------------------
+' 1120  Blank header encountered.
+' 1121  Duplicate header (case-insensitive).
+' 1170  Excel error value found in a cell.
+' 1171  DataBodyRange column count mismatch.
+' 1172  TAG_OBJECT not initialized.
+' 905   Header contains array index path ("[ ]"), which is unsupported.
+'
+' -----------------------------------------------------------------------------
+' DESIGN NOTES
+' -----------------------------------------------------------------------------
+' • Uses Value2 to avoid Excel type coercion during read.
+' • JSON objects are represented internally as tagged Collections where
+'   index(1) = TAG_OBJECT.
+' • The function intentionally does not define policy for Excel-specific
+'   values such as Dates, formulas, or numeric precision. These are passed
+'   through as returned by Excel and may be normalized by callers if needed.
+' =============================================================================
 Public Function Excel_ListObjectToJson( _
     ByVal lo As ListObject, _
     Optional ByVal includeBlanksAsNull As Boolean = False, _
