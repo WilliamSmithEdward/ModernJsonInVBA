@@ -47,7 +47,7 @@ Public Sub RunAll_JsonExcelTests_StopOnFail()
     ' Delete all test sheets (backwards loop to avoid enumerator skip)
     Dim i As Long
     For i = wb.Worksheets.count To 1 Step -1
-        If wb.Worksheets(i).Name <> "Modern Json in VBA" And wb.Worksheets(i).Name <> "Performance" And wb.Worksheets(i).Name <> "Quick Start" And wb.Worksheets(i).Name <> "ListObject to JSON" Then
+        If wb.Worksheets(i).Name <> "Modern Json in VBA" And wb.Worksheets(i).Name <> "Performance" And wb.Worksheets(i).Name <> "Quick Start" And wb.Worksheets(i).Name <> "ListObject to JSON" And wb.Worksheets(i).Name <> "Complex Nesting" Then
             wb.Worksheets(i).Delete
         End If
     Next i
@@ -98,11 +98,17 @@ Public Sub RunAll_JsonExcelTests_StopOnFail()
     Test_Refresh_PreservesFormulaColumns_AndFillsDown_WithAsserts
     Test_Append_AutoFillFormulaColumns_ForNewRows_WithAsserts
     Test_Refresh_PreservesFormulaColumns_And_FillsDown_WithAsserts
+    Test_Excel_ListObjectToJson_ParseJsonInCells_ArraysVsObjects_WithAsserts
+    Test_Upsert_TableRoot_ArrayHandling_ExcludeVsJsonText
+    Test_Upsert_NestedArraysStoredAsJsonCells
+    Test_MixedShape_PrimitiveParent_And_ChildPath_MustRaise907
+    Test_ParseJsonInCells_InvalidJson_IsKeptAsString
+    Test_Stringify_RejectsObjectShapedUntaggedCollection
     ' End Tests
 
     ' Cleanup (same safe backwards loop)
     For i = wb.Worksheets.count To 1 Step -1
-        If wb.Worksheets(i).Name <> "Modern Json in VBA" And wb.Worksheets(i).Name <> "Performance" And wb.Worksheets(i).Name <> "Quick Start" And wb.Worksheets(i).Name <> "ListObject to JSON" Then
+        If wb.Worksheets(i).Name <> "Modern Json in VBA" And wb.Worksheets(i).Name <> "Performance" And wb.Worksheets(i).Name <> "Quick Start" And wb.Worksheets(i).Name <> "ListObject to JSON" And wb.Worksheets(i).Name <> "Complex Nesting" Then
             wb.Worksheets(i).Delete
         End If
     Next i
@@ -132,6 +138,19 @@ End Sub
 ' =============================================================================
 Private Sub AssertTrue(ByVal condition As Boolean, ByVal message As String)
     If Not condition Then Err.Raise vbObjectError + 610, "mJsonExcelTests", "ASSERT FAIL: " & message
+End Sub
+
+Public Sub AssertFalse( _
+    ByVal condition As Boolean, _
+    Optional ByVal message As String = "" _
+)
+    If condition Then
+        If Len(message) > 0 Then
+            Err.Raise vbObjectError + 2002, "AssertFalse", message
+        Else
+            Err.Raise vbObjectError + 2002, "AssertFalse", "Assertion failed: expected False but was True."
+        End If
+    End If
 End Sub
 
 Private Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, ByVal message As String)
@@ -457,6 +476,18 @@ Private Function GetTable(ByVal ws As Worksheet, ByVal tableName As String) As L
     Set GetTable = Excel_GetListObject(ws, tableName)
 End Function
 
+Public Function Excel_TableHasHeader(ByVal lo As ListObject, ByVal headerName As String) As Boolean
+    Excel_TableHasHeader = False
+    If lo Is Nothing Then Exit Function
+
+    Dim i As Long
+    For i = 1 To lo.ListColumns.count
+        If StrComp(CStr(lo.ListColumns(i).Name), headerName, vbTextCompare) = 0 Then
+            Excel_TableHasHeader = True
+            Exit Function
+        End If
+    Next i
+End Function
 
 ' =============================================================================
 ' INTERNAL: JSON -> headersOut + data2D pipeline (no Excel write)
@@ -3916,5 +3947,531 @@ Public Sub Test_Refresh_PreservesFormulaColumns_And_FillsDown_WithAsserts()
     AssertBodyCellEquals lo, 1, "total", 28, "PASS B row1 total (4*7)"
     AssertBodyCellEquals lo, 2, "total", 9, "PASS B row2 total (1*9)"
     AssertBodyCellEquals lo, 3, "total", 12, "PASS B row3 total (6*2)"
+
+End Sub
+
+
+' =============================================================================
+' TEST 46: Excel_ListObjectToJson parses JSON text in cells (arrays-only vs arrays+objects)
+'
+' Goal:
+'   - Build a 1-row table with:
+'       id   = 1
+'       tags = ["a","b"]      (JSON array text)
+'       meta = {"x":1}        (JSON object text)
+'       note = 123            (primitive)
+'   - PASS A: parseJsonInCells=True, parseArraysOnly=True
+'       * tags becomes a real JSON array node
+'       * meta remains a string (not parsed)
+'       * note remains numeric primitive
+'   - PASS B: parseJsonInCells=True, parseArraysOnly=False
+'       * tags becomes array node
+'       * meta becomes object node
+'       * note remains numeric primitive
+'   - PASS C: parseJsonInCells=False
+'       * tags/meta remain strings
+'
+' Dependencies:
+'   - EnsureTestSheet
+'   - ResetSheetButKeepTableTestSafe
+'   - Excel_UpsertListObjectOnSheet
+'   - GetTable
+'   - AssertNotNothing
+'   - AssertEquals
+'   - AssertTrue
+'   - AssertFalse   (new)
+'   - Json_ParseInto
+'   - Json_IsArray / Json_IsObject
+'   - Json_TryObjGet
+' =============================================================================
+Public Sub Test_Excel_ListObjectToJson_ParseJsonInCells_ArraysVsObjects_WithAsserts()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_ListObjectToJson_ParseCells")
+    ResetSheetButKeepTableTestSafe ws
+
+    ' -----------------------------
+    ' Seed table (1 row)
+    ' -----------------------------
+    Dim headers As Variant
+    headers = Array("id", "tags", "meta", "note")
+
+    Dim data2D As Variant
+    ReDim data2D(1 To 1, 1 To 4)
+    data2D(1, 1) = 1
+    data2D(1, 2) = "[""a"",""b""]"
+    data2D(1, 3) = "{""x"":1}"
+    data2D(1, 4) = 123
+
+    Excel_UpsertListObjectOnSheet ws, "tCellJson", ws.Range("A1"), headers, data2D, True, True, False
+
+    Dim lo As ListObject
+    Set lo = GetTable(ws, "tCellJson")
+    AssertNotNothing lo, "tCellJson should exist"
+
+    ' =====================================================================
+    ' PASS A: parse arrays only
+    ' =====================================================================
+    Dim jsonA As String
+    jsonA = Excel_ListObjectToJson(lo, False, True, True)
+
+    Dim parsedA As Variant
+    Json_ParseInto jsonA, parsedA
+
+    AssertTrue Json_IsArray(parsedA), "PASS A: output root should be JSON array"
+    Dim arrA As Collection
+    Set arrA = parsedA
+
+    AssertEquals 1, arrA.count, "PASS A: array length"
+
+    Dim rowA As Collection
+    Set rowA = arrA(1)
+    AssertTrue Json_IsObject(rowA), "PASS A: first element should be JSON object"
+
+    Dim vId As Variant, vTags As Variant, vMeta As Variant, vNote As Variant
+
+    AssertTrue Json_TryObjGet(rowA, "id", vId), "PASS A resolve id"
+    AssertTrue Json_TryObjGet(rowA, "tags", vTags), "PASS A resolve tags"
+    AssertTrue Json_TryObjGet(rowA, "meta", vMeta), "PASS A resolve meta"
+    AssertTrue Json_TryObjGet(rowA, "note", vNote), "PASS A resolve note"
+
+    AssertEquals 1, CLng(vId), "PASS A id value"
+    AssertTrue Json_IsArray(vTags), "PASS A tags should be parsed into JSON array node"
+    AssertFalse Json_IsObject(vMeta), "PASS A meta should NOT be parsed (arrays-only mode)"
+    AssertEquals "{""x"":1}", CStr(vMeta), "PASS A meta should remain literal string"
+    AssertEquals 123, CLng(vNote), "PASS A note numeric primitive"
+
+    ' =====================================================================
+    ' PASS B: parse arrays + objects
+    ' =====================================================================
+    Dim jsonB As String
+    jsonB = Excel_ListObjectToJson(lo, False, True, False)
+
+    Dim parsedB As Variant
+    Json_ParseInto jsonB, parsedB
+
+    AssertTrue Json_IsArray(parsedB), "PASS B: output root should be JSON array"
+    Dim arrB As Collection
+    Set arrB = parsedB
+
+    AssertEquals 1, arrB.count, "PASS B: array length"
+
+    Dim rowB As Collection
+    Set rowB = arrB(1)
+    AssertTrue Json_IsObject(rowB), "PASS B: first element should be JSON object"
+
+    AssertTrue Json_TryObjGet(rowB, "tags", vTags), "PASS B resolve tags"
+    AssertTrue Json_TryObjGet(rowB, "meta", vMeta), "PASS B resolve meta"
+    AssertTrue Json_TryObjGet(rowB, "note", vNote), "PASS B resolve note"
+
+    AssertTrue Json_IsArray(vTags), "PASS B tags should be parsed into JSON array node"
+    AssertTrue Json_IsObject(vMeta), "PASS B meta should be parsed into JSON object node"
+    AssertEquals 123, CLng(vNote), "PASS B note numeric primitive"
+
+    ' Optional: validate meta.x = 1
+    Dim metaObj As Collection
+    Set metaObj = vMeta
+
+    Dim vX As Variant
+    AssertTrue Json_TryObjGet(metaObj, "x", vX), "PASS B resolve meta.x"
+    AssertEquals 1, CLng(vX), "PASS B meta.x value"
+
+    ' =====================================================================
+    ' PASS C: parseJsonInCells=False (no parsing)
+    ' =====================================================================
+    Dim jsonC As String
+    jsonC = Excel_ListObjectToJson(lo, False, False, False)
+
+    Dim parsedC As Variant
+    Json_ParseInto jsonC, parsedC
+
+    AssertTrue Json_IsArray(parsedC), "PASS C: output root should be JSON array"
+    Dim arrC As Collection
+    Set arrC = parsedC
+
+    Dim rowC As Collection
+    Set rowC = arrC(1)
+
+    AssertTrue Json_TryObjGet(rowC, "tags", vTags), "PASS C resolve tags"
+    AssertTrue Json_TryObjGet(rowC, "meta", vMeta), "PASS C resolve meta"
+
+    AssertFalse Json_IsArray(vTags), "PASS C tags should remain string when parsing disabled"
+    AssertFalse Json_IsObject(vMeta), "PASS C meta should remain string when parsing disabled"
+    AssertEquals "[""a"",""b""]", CStr(vTags), "PASS C tags literal string"
+    AssertEquals "{""x"":1}", CStr(vMeta), "PASS C meta literal string"
+
+End Sub
+
+
+' =============================================================================
+' TEST 47: Upsert tableRoot arrays handling
+'
+' Goal:
+'   Validate the new inbound flatten behavior:
+'     - Nested objects unflatten into columns
+'     - Primitives show as values
+'     - Non-table arrays are either:
+'         * excluded (arraysAsJson=False)
+'         * stored as JSON text in the cell (arraysAsJson=True)
+'
+' Setup:
+'   Root is an array-of-objects at "$".
+'   Each row contains:
+'     - id (primitive)
+'     - note (primitive)
+'     - meta.x (nested object)
+'     - tags (array)           -> should be excluded or JSON text
+'     - meta.arr (array)       -> should be excluded or JSON text
+' =============================================================================
+Public Sub Test_Upsert_TableRoot_ArrayHandling_ExcludeVsJsonText()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_Upsert_ArrayHandling")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim lo As ListObject
+
+    Dim jsonText As String
+    jsonText = "[" & _
+        "{""id"":1,""tags"":[""a"",""b""],""meta"":{""x"":1,""arr"":[1,2]},""note"":123}" & _
+    "]"
+
+    ' -----------------------------
+    ' PASS A: arraysAsJson := False  (exclude non-table arrays)
+    ' -----------------------------
+    Excel_UpsertListObjectFromJsonAtRoot ws, "tArrayMode", ws.Range("A1"), _
+        jsonText, "$", _
+        True, True, False, _
+        True, True, _
+        False   ' arraysAsJson
+
+    Set lo = GetTable(ws, "tArrayMode")
+    AssertNotNothing lo, "PASS A table exists"
+    AssertRowCount lo, 1, "PASS A row count"
+
+    ' Should include primitives + nested object leaf
+    AssertBodyCellEquals lo, 1, "id", 1, "PASS A id"
+    AssertBodyCellEquals lo, 1, "note", 123, "PASS A note"
+    AssertBodyCellEquals lo, 1, "meta.x", 1, "PASS A meta.x"
+
+    ' Must NOT include non-table arrays
+    AssertFalse Excel_TableHasHeader(lo, "tags"), "PASS A excludes tags array column"
+    AssertFalse Excel_TableHasHeader(lo, "meta.arr"), "PASS A excludes meta.arr array column"
+
+    ' -----------------------------
+    ' PASS B: arraysAsJson := True  (store non-table arrays as JSON in cell)
+    ' -----------------------------
+    ResetSheetButKeepTableTestSafe ws
+
+    Excel_UpsertListObjectFromJsonAtRoot ws, "tArrayMode", ws.Range("A1"), _
+        jsonText, "$", _
+        True, True, False, _
+        True, True, _
+        True   ' arraysAsJson
+
+    Set lo = GetTable(ws, "tArrayMode")
+    AssertNotNothing lo, "PASS B table exists"
+    AssertRowCount lo, 1, "PASS B row count"
+
+    ' Same primitive + object leaf behavior
+    AssertBodyCellEquals lo, 1, "id", 1, "PASS B id"
+    AssertBodyCellEquals lo, 1, "note", 123, "PASS B note"
+    AssertBodyCellEquals lo, 1, "meta.x", 1, "PASS B meta.x"
+
+    ' Now arrays should be present as JSON text
+    AssertTrue Excel_TableHasHeader(lo, "tags"), "PASS B includes tags column"
+    AssertTrue Excel_TableHasHeader(lo, "meta.arr"), "PASS B includes meta.arr column"
+
+    AssertBodyCellEquals lo, 1, "tags", "[""a"",""b""]", "PASS B tags JSON text"
+    AssertBodyCellEquals lo, 1, "meta.arr", "[1,2]", "PASS B meta.arr JSON text"
+
+End Sub
+
+
+' =============================================================================
+' TEST 47: Nested tables (arrays below root) are stored as JSON text in cells
+'
+' Goal:
+'   Validate the rule:
+'       Arrays expand ONLY if they are the tableRoot.
+'       Arrays below the root remain atomic JSON values in a single cell.
+'
+' JSON:
+' [
+'   {
+'       "id":1,
+'       "items":[{"sku":"A"},{"sku":"B"}],
+'       "tags":["a","b"],
+'       "meta":{"x":1,"arr":[1,2]}
+'   }
+' ]
+'
+' Expected table:
+'
+'   id | items                               | tags       | meta.x | meta.arr | note
+'   --------------------------------------------------------------------------------
+'   1  | [{"sku":"A"},{"sku":"B"}]            | ["a","b"]  | 1      | [1,2]
+'
+' Notes:
+'   - items is an array-of-objects ? JSON cell
+'   - tags is an array-of-primitives ? JSON cell
+'   - meta.x is a nested object primitive ? flattened column
+'   - meta.arr is nested array ? JSON cell
+' =============================================================================
+Public Sub Test_Upsert_NestedArraysStoredAsJsonCells()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_NestedArraysAsJson")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim jsonText As String
+    jsonText = "[" & _
+        "{""id"":1,""items"":[{""sku"":""A""},{""sku"":""B""}],""tags"":[""a"",""b""],""meta"":{""x"":1,""arr"":[1,2]}}" & _
+    "]"
+
+    Excel_UpsertListObjectFromJsonAtRoot _
+        ws, _
+        "tNestedArrays", _
+        ws.Range("A1"), _
+        jsonText, _
+        "$", _
+        True, True, False, _
+        True, True, _
+        True     ' arraysAsJson
+
+    Dim lo As ListObject
+    Set lo = GetTable(ws, "tNestedArrays")
+
+    AssertNotNothing lo, "table should exist"
+    AssertRowCount lo, 1, "row count"
+
+    AssertHeaderEquals lo, Array("id", "items", "tags", "meta.x", "meta.arr"), "headers"
+
+    AssertBodyCellEquals lo, 1, "id", 1, "id value"
+
+    AssertBodyCellEquals lo, 1, "items", _
+        "[{""sku"":""A""},{""sku"":""B""}]", _
+        "items JSON cell"
+
+    AssertBodyCellEquals lo, 1, "tags", _
+        "[""a"",""b""]", _
+        "tags JSON cell"
+
+    AssertBodyCellEquals lo, 1, "meta.x", 1, "meta.x value"
+
+    AssertBodyCellEquals lo, 1, "meta.arr", _
+        "[1,2]", _
+        "meta.arr JSON cell"
+
+End Sub
+
+
+' =============================================================================
+' TEST 47: Complex round-trip (nested objects unflatten, nested arrays as JSON cells)
+'
+' Goal:
+'   - Upsert complex JSON at nested root $.orders
+'   - Verify headers + in-cell JSON strings for arrays below root
+'   - Convert ListObject back to JSON with:
+'       * includeBlanksAsNull := True (so null survives Excel blanking)
+'       * parseJsonInCells := True, parseArraysOnly := True (so [..] cells become real arrays)
+'   - Compare normalized JSON for $.orders (array) vs round-tripped table JSON (array)
+' =============================================================================
+Public Sub Test_ComplexRoundTrip_NestedObjects_And_NestedArraysAsJson()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_RoundTrip_Complex")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim jsonIn As String
+    jsonIn = "{""orders"":[" & _
+        "{" & _
+            """id"":1," & _
+            """items"":[{""sku"":""A"",""qty"":2},{""sku"":""B"",""qty"":1}]," & _
+            """tags"":[""a"",""b""]," & _
+            """meta"":{""x"":1,""arr"":[1,2]}," & _
+            """note"":123" & _
+        "}," & _
+        "{" & _
+            """id"":2," & _
+            """items"":[]," & _
+            """tags"":[]," & _
+            """meta"":{""x"":0,""arr"":[]}," & _
+            """note"":null" & _
+        "}" & _
+    "]}"
+
+    ' Upsert at nested root: $.orders
+    ' arraysAsJson:=True => arrays below root should be JSON in-cell (not expanded)
+    Excel_UpsertListObjectFromJsonAtRoot ws, "tOrders", ws.Range("A1"), jsonIn, "$.orders", _
+        True, True, False, True, True, True
+
+    Dim lo As ListObject
+    Set lo = GetTable(ws, "tOrders")
+    AssertNotNothing lo, "tOrders should exist"
+
+    AssertHeaderEquals lo, Array("id", "items", "tags", "meta.x", "meta.arr", "note"), "Headers"
+
+    AssertBodyCellEquals lo, 1, "items", "[{""sku"":""A"",""qty"":2},{""sku"":""B"",""qty"":1}]", "Row1 items JSON"
+    AssertBodyCellEquals lo, 1, "tags", "[""a"",""b""]", "Row1 tags JSON"
+    AssertBodyCellEquals lo, 1, "meta.arr", "[1,2]", "Row1 meta.arr JSON"
+    AssertBodyCellEquals lo, 2, "items", "[]", "Row2 items JSON"
+    AssertBodyCellEquals lo, 2, "tags", "[]", "Row2 tags JSON"
+    AssertBodyCellEquals lo, 2, "meta.arr", "[]", "Row2 meta.arr JSON"
+
+    ' Convert table back to JSON array-of-objects.
+    ' includeBlanksAsNull:=True preserves nulls that Excel represented as blank cells.
+    ' parseJsonInCells:=True + parseArraysOnly:=True parses "[...]" cells back into arrays.
+    Dim jsonOut As String
+    jsonOut = Excel_ListObjectToJson(lo, True, True, True)
+
+    ' Normalize and compare the SAME SHAPE:
+    '   - expected: $.orders (array)
+    '   - actual:   table JSON (array)
+    Dim vIn As Variant, vOrders As Variant, vOut As Variant
+    Json_ParseInto jsonIn, vIn
+    AssertTrue Json_TryResolvePath(vIn, "$.orders", vOrders), "Resolve $.orders"
+    Json_ParseInto jsonOut, vOut
+
+    Dim normExpected As String, normActual As String
+    normExpected = Json_Stringify(vOrders)
+    normActual = Json_Stringify(vOut)
+
+    AssertEquals normExpected, normActual, "Complex round-trip normalized $.orders should match"
+
+End Sub
+
+' =============================================================================
+' TEST 48: Mixed-shape collision (primitive parent + child path) must fail fast
+'
+' Goal:
+'   - Build a table that contains BOTH:
+'       * "meta"   (primitive)
+'       * "meta.x" (child path requiring meta to be an object)
+'   - Convert ListObject -> JSON via Excel_ListObjectToJson
+'   - Assert that unflatten collision raises vbObjectError + 907
+'
+' Why this matters:
+'   Mixed-shape schemas are ambiguous. This test ensures you do NOT silently
+'   overwrite either the primitive or the object when round-tripping.
+' =============================================================================
+Public Sub Test_MixedShape_PrimitiveParent_And_ChildPath_MustRaise907()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_MixedShape_Collision_907")
+    ResetSheetButKeepTableTestSafe ws
+
+    ' Create a table with headers ordered so "meta" is processed BEFORE "meta.x"
+    Dim headers As Variant
+    headers = Array("id", "meta", "meta.x")
+
+    Dim data2D As Variant
+    ReDim data2D(1 To 1, 1 To 3)
+    data2D(1, 1) = 1     ' id
+    data2D(1, 2) = 0     ' meta (primitive)
+    data2D(1, 3) = 1     ' meta.x (requires meta to be object) => collision
+
+    Excel_UpsertListObjectOnSheet ws, "tMixed", ws.Range("A1"), headers, data2D, True, True, False
+
+    Dim lo As ListObject
+    Set lo = GetTable(ws, "tMixed")
+    AssertNotNothing lo, "tMixed should exist"
+
+    ' Attempt round-trip table -> JSON should raise collision 907
+    Dim gotErr As Long
+    gotErr = 0
+
+    On Error Resume Next
+    Dim jsonOut As String
+    jsonOut = Excel_ListObjectToJson(lo, True, False, False)
+    gotErr = Err.Number
+    On Error GoTo 0
+
+    AssertEquals vbObjectError + 907, gotErr, "Mixed-shape collision must raise vbObjectError + 907"
+
+End Sub
+
+
+' =============================================================================
+' TEST 49: Invalid JSON in a "JSON cell" must not throw (swallow parse error)
+'
+' Goal:
+'   - When parseJsonInCells=True, a cell that *looks* like JSON but is invalid
+'     must be treated as a normal string (TryParseJsonCell swallows).
+'   - Round-trip should keep the original string exactly.
+' =============================================================================
+Public Sub Test_ParseJsonInCells_InvalidJson_IsKeptAsString()
+
+    Dim ws As Worksheet
+    Set ws = EnsureTestSheet("zTest_InvalidJsonCell_NoThrow")
+    ResetSheetButKeepTableTestSafe ws
+
+    Dim headers As Variant
+    headers = Array("id", "items")
+
+    Dim badJson As String
+    badJson = "[{""sku"":""A""}"   ' missing closing bracket + brace
+
+    Dim data2D As Variant
+    ReDim data2D(1 To 1, 1 To 2)
+    data2D(1, 1) = 1
+    data2D(1, 2) = badJson
+
+    Excel_UpsertListObjectOnSheet ws, "tBad", ws.Range("A1"), headers, data2D, True, True, False
+
+    Dim lo As ListObject
+    Set lo = GetTable(ws, "tBad")
+    AssertNotNothing lo, "tBad should exist"
+
+    ' parseJsonInCells:=True, parseArraysOnly:=True
+    ' badJson starts with "[" so it will be attempted, but must be swallowed and kept as a string.
+    Dim jsonOut As String
+    jsonOut = Excel_ListObjectToJson(lo, True, True, True)
+
+    ' expected: [{"id":1,"items":"<badJson>"}]  (items is a STRING, not an array)
+    Dim vOut As Variant
+    Json_ParseInto jsonOut, vOut
+
+    Dim row0 As Variant
+    Set row0 = vOut(1) ' first element in array (1-based Collection)
+
+    Dim gotItems As Variant
+    AssertTrue Json_TryObjGet(row0, "items", gotItems), "items key exists"
+
+    AssertEquals badJson, CStr(gotItems), "Invalid JSON cell must remain literal string"
+
+End Sub
+
+
+' =============================================================================
+' TEST 50: Json_Stringify rejects untagged object-shaped Collections (error +1134)
+'
+' Why this matters:
+'   - The model requires JSON objects be tagged with TAG_OBJECT in slot(1).
+'   - An untagged Collection that *looks like* key/value pairs is a contract violation.
+'   - Json_Stringify MUST fail deterministically (prevents silent shape ambiguity).
+'
+' Expected:
+'   - Err.Number = vbObjectError + 1134
+'   - Err.Source = "Json_Stringify"
+' =============================================================================
+Public Sub Test_Stringify_RejectsObjectShapedUntaggedCollection()
+
+    Dim bad As New Collection
+    ' looks like a key/value pair array => object-shaped
+    bad.Add Array("a", 1)
+    bad.Add Array("b", 2)
+
+    On Error GoTo gotErr
+    Dim s As String
+    s = Json_Stringify(bad)
+
+    AssertTrue False, "Expected error vbObjectError+1134, but Json_Stringify returned: " & s
+    Exit Sub
+
+gotErr:
+    AssertEquals vbObjectError + 1134, Err.Number, "Error number"
+    AssertEquals "Json_Stringify", Err.Source, "Error source"
+    Err.Clear
 
 End Sub
