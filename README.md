@@ -19,6 +19,7 @@ Pure VBA. No dependencies. No silent schema drift.
   - [Refresh Mode](#refresh-mode)
   - [Append Mode](#append-mode)
   - [Strict Schema Mode](#strict-schema-mode)
+- [Excel_UpsertListObjectFromJsonAtRoot](#excel_upsertlistobjectfromjsonatroot)
 - [Excel to JSON (Reverse Materialization)](#excel-to-json-reverse-materialization)
 - [Understanding tableRoot](#understanding-tableroot)
 - [HTTP Helper (Windows)](#http-helper-windows)
@@ -251,6 +252,51 @@ Private Function HttpGetText(ByVal url As String) As String
 
 End Function
 ```
+
+------------------------------------------------------------------------
+
+## Excel_UpsertListObjectFromJsonAtRoot
+
+### Overview
+
+`Excel_UpsertListObjectFromJsonAtRoot` parses JSON, extracts a specific **array-of-objects** using a JSON path (`tableRoot`), converts the objects into rows, and **upserts** the result into an Excel table (`ListObject`).
+
+The function handles nested objects automatically, preserves schema deterministically, and optionally stores nested arrays as JSON text in cells.
+
+---
+
+### Parameters
+
+| Parameter | Description |
+|---|---|
+`ws` | Worksheet where the table exists or will be created |
+`tableName` | Name of the Excel table (`ListObject`) |
+`topLeft` | Cell where the table should be created if it does not already exist |
+`jsonText` | The JSON text to parse |
+`tableRoot` | JSON path that resolves to the **array-of-objects** that should become table rows |
+
+---
+
+### Behavior Flags
+
+| Flag | Description |
+|---|---|
+`clearExisting` | If `True`, existing rows are cleared before writing new data (refresh mode). If `False`, rows are appended. |
+`addMissingColumns` | If `True`, new columns discovered in the JSON will be added to the table. |
+`removeMissingColumns` | If `True`, columns not present in the JSON will be removed from the table. |
+`preserveFormulaColumns` | If `True`, existing formula columns are preserved during updates. |
+`fillFormulasOnAppend` | If `True`, formulas automatically fill newly appended rows. |
+`nonTableArraysAsJson` | If `True`, nested arrays that are not part of `tableRoot` are stored in cells as JSON text. If `False`, those arrays are excluded from the table extraction. |
+
+---
+
+### Notes
+
+- `tableRoot` must resolve to an **array of JSON objects** (or `null`).
+- Nested objects are flattened into dot-notation columns (`customer.id`, `customer.name`, etc.).
+- Nested arrays not part of the selected table root can optionally be preserved as JSON text inside cells.
+
+For more advanced usage (including nested table extraction and round-trip workflows), see the **complex nesting example in the provided `.xlsm` workbook**.
 
 ------------------------------------------------------------------------
 
