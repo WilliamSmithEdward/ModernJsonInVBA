@@ -102,7 +102,23 @@ End Sub
 ' Public API: JSON Type Helpers
 ' =============================================================================
 
-' True when v is a Collection tagged as an object.
+' =============================================================================
+' Json_IsObject
+'
+' Purpose:
+'   Determine whether v is a JSON Object in this library's in-memory model.
+'
+' Model Contract:
+'   - JSON Object is represented as a VBA Collection tagged with TAG_OBJECT at (1).
+'   - Pairs follow at (2..n) as Array(key,value) (preferred) or other accepted shapes.
+'
+' Returns:
+'   True  => v is a Collection and v(1)=TAG_OBJECT
+'   False => otherwise
+'
+' Notes:
+'   - This does NOT validate the object’s internal pair shapes; it only checks the tag.
+' =============================================================================
 Public Function Json_IsObject(ByVal v As Variant) As Boolean
     If Not IsObject(v) Then Exit Function
     If TypeName(v) <> "Collection" Then Exit Function
@@ -116,7 +132,24 @@ Public Function Json_IsObject(ByVal v As Variant) As Boolean
     End If
 End Function
 
-' True when v is a Collection that is not a tagged object.
+' =============================================================================
+' Json_IsArray
+'
+' Purpose:
+'   Determine whether v is a JSON Array in this library's in-memory model.
+'
+' Model Contract:
+'   - JSON Array is represented as an UNTAGGED VBA Collection.
+'   - A tagged Collection (TAG_OBJECT at (1)) is treated as an object, not an array.
+'
+' Returns:
+'   True  => v is a Collection AND NOT a tagged object
+'   False => otherwise
+'
+' Notes:
+'   - This function treats any untagged Collection as an array, even if its contents
+'     “look like” key/value pairs. Tagging is the authoritative object signal.
+' =============================================================================
 Public Function Json_IsArray(ByVal v As Variant) As Boolean
     If Not IsObject(v) Then Exit Function
     If TypeName(v) <> "Collection" Then Exit Function
@@ -254,42 +287,94 @@ NextItem:
 End Function
 
 ' =============================================================================
-' Public API: Flatten and Flat Access
+' Json_Flatten
+'
+' Purpose:
+'   Flatten a parsed JSON value into a tagged object of [path,value] pairs.
+'
+' Output Shape:
+'   Returns a tagged object Collection where:
+'     (1) = TAG_OBJECT
+'     (2..n) = Array(path As String, value As Variant)
+'
+' Path Format:
+'   - Root: "$"
+'   - Object: "$.a.b"
+'   - Array index: "$.items[0].id"
+'   - Keys with dots are escaped during flatten via Json_EscapePathSegment.
+'
+' Determinism:
+'   - Pair emission order follows deterministic traversal of tagged objects and arrays.
+'
+' Parameters:
+'   maxDepth:
+'     When exceeded, the remaining subtree is stored as JSON text at that path.
+'
+'   tableRootToExpand + arrayMode:
+'     arrayMode=0 (legacy): expand all arrays
+'     arrayMode=1: expand ONLY arrays that are the tableRoot or ancestors of it; exclude all others
+'     arrayMode=2: expand ONLY tableRoot/ancestors; stringify all other arrays into the cell
+'
+' Notes:
+'   - For table-aware modes (1/2), we normalize tableRootToExpand by removing indices
+'     so roots like "$[0].items" or "$.orders[0].items" still correctly expand ancestors.
 ' =============================================================================
+Public Function Json_Flatten( _
+    ByVal parsedJson As Variant, _
+    Optional ByVal maxDepth As Long = 12, _
+    Optional ByVal tableRootToExpand As String = vbNullString, _
+    Optional ByVal arrayMode As Long = 0 _
+) As Collection
 
-' Flatten parsed JSON into a tagged object containing [path,value] pairs.
-'
-' Paths:
-'   - Root uses "$"
-'   - Objects use "." separators, with "\" and "." escaped inside segments:
-'       "\" -> "\\", "." -> "\."
-'   - Arrays use zero-based indices: "[n]"
-'
-' maxDepth:
-'   If exceeded, the current node is stringified and stored as a leaf.
-Public Function Json_Flatten(ByVal parsedJson As Variant, Optional ByVal maxDepth As Long = 12) As Collection
     Dim flat As New Collection
     flat.Add TAG_OBJECT
 
+    Dim tableRootNorm As String
+    tableRootNorm = Trim$(tableRootToExpand)
+
+    ' Normalize only for table-aware flattening (modes 1/2).
+    If arrayMode <> 0 Then
+        If Len(tableRootNorm) > 0 Then
+            tableRootNorm = Json_RemoveIndices(tableRootNorm)
+        End If
+    End If
+
     If IsObject(parsedJson) Then
         If Json_IsObject(parsedJson) Or Json_IsArray(parsedJson) Then
-            Json_FlattenInto flat, "$", parsedJson, 0, maxDepth
+            Json_FlattenInto flat, "$", parsedJson, 0, maxDepth, tableRootNorm, arrayMode
         Else
-            Json_FlattenInto flat, vbNullString, parsedJson, 0, maxDepth
+            Json_FlattenInto flat, vbNullString, parsedJson, 0, maxDepth, tableRootNorm, arrayMode
         End If
     Else
-        Json_FlattenInto flat, vbNullString, parsedJson, 0, maxDepth
+        Json_FlattenInto flat, vbNullString, parsedJson, 0, maxDepth, tableRootNorm, arrayMode
     End If
 
     Set Json_Flatten = flat
 End Function
 
-' Return a primitive value at exact path from a tagged flat object.
+' =============================================================================
+' Json_FlatGet
+'
+' Purpose:
+'   Retrieve the primitive value at an exact path from a flattened tagged object.
+'
+' Parameters:
+'   flatObj:
+'     Tagged object from Json_Flatten (TAG_OBJECT at slot 1).
+'   path:
+'     Exact path key to find (case-sensitive, binary compare).
+'
+' Returns:
+'   The stored value (must be non-object).
 '
 ' Errors:
-'   vbObjectError + 880 flatObj not tagged object
-'   vbObjectError + 881 path refers to object
-'   vbObjectError + 882 path not found
+'   vbObjectError + 880  flatObj is not a tagged object
+'   vbObjectError + 881  path exists but refers to an object/array (IsObject=True)
+'   vbObjectError + 882  path not found
+'
+' Notes:
+'   - This is an O(n) scan over flatObj pairs (2..count).
+' =============================================================================
 Public Function Json_FlatGet(ByVal flatObj As Collection, ByVal path As String) As Variant
     If Not Json_IsObject(flatObj) Then
         Err.Raise vbObjectError + 880, ERR_SRC, "FlatGet expects tagged object"
@@ -312,10 +397,27 @@ Public Function Json_FlatGet(ByVal flatObj As Collection, ByVal path As String) 
     Err.Raise vbObjectError + 882, ERR_SRC, "Path not found: " & path
 End Function
 
-' True when flatObj contains exact path.
+' =============================================================================
+' Json_FlatContains
+'
+' Purpose:
+'   Check whether a flattened tagged object contains an exact path key.
+'
+' Parameters:
+'   flatObj:
+'     Tagged object from Json_Flatten (TAG_OBJECT at slot 1).
+'   path:
+'     Exact path key to find (case-sensitive, binary compare).
+'
+' Returns:
+'   True if a pair exists with pair(0)=path; False otherwise.
 '
 ' Errors:
-'   vbObjectError + 890 flatObj not tagged object
+'   vbObjectError + 890  flatObj is not a tagged object
+'
+' Notes:
+'   - This is an O(n) scan over flatObj pairs (2..count).
+' =============================================================================
 Public Function Json_FlatContains(ByVal flatObj As Collection, ByVal path As String) As Boolean
     If Not Json_IsObject(flatObj) Then
         Err.Raise vbObjectError + 890, ERR_SRC, "FlatContains expects tagged object"
@@ -332,14 +434,32 @@ Public Function Json_FlatContains(ByVal flatObj As Collection, ByVal path As Str
     Next i
 End Function
 
-' Build a tagged object from a tagged flat object.
+' =============================================================================
+' Json_Unflatten
 '
-' Notes:
-'   - "$" is stored as a key "$" under the returned root object.
-'   - Array indices in paths are not supported (error).
+' Purpose:
+'   Reconstruct a nested tagged object from a flattened tagged object of [path,value] pairs.
+'
+' Input Shape:
+'   flatObj must be a tagged object:
+'     (1)=TAG_OBJECT
+'     (2..n)=Array(path,value)
+'
+' Output Shape:
+'   Returns a tagged object root. Special case:
+'     - A flat pair with path="$" is stored under key "$" in the returned object.
+'
+' Limitations:
+'   - Array indices in paths are NOT supported and will raise.
 '
 ' Errors:
-'   vbObjectError + 900 flatObj not tagged object
+'   vbObjectError + 900  flatObj not tagged object
+'   vbObjectError + 905  array index paths encountered (raised by internals)
+'   vbObjectError + 907+ unflatten collision / invalid existing type while descending
+'
+' Notes:
+'   - Keys with escaped dots and backslashes are handled via Json_(Un)escapePathSegment.
+' =============================================================================
 Public Function Json_Unflatten(ByVal flatObj As Collection) As Collection
     If Not Json_IsObject(flatObj) Then
         Err.Raise vbObjectError + 900, ERR_SRC, "Unflatten expects tagged object"
@@ -423,7 +543,24 @@ End Function
 ' Public API: Table Extraction and 2D Conversion
 ' =============================================================================
 
-' Set key=value on a tagged object Collection, overwriting existing key.
+' =============================================================================
+' Json_ObjSet
+'
+' Purpose:
+'   Set key=value on a tagged JSON object Collection, overwriting if the key exists.
+'
+' Model Contract:
+'   - obj must be a tagged object Collection: obj(1)=TAG_OBJECT
+'   - Each member is stored as Array(key,value) (preferred).
+'
+' Behavior:
+'   - If key exists, removes existing entry and reinserts at the same position
+'     to preserve deterministic relative order.
+'   - If key does not exist, appends the new pair at the end.
+'
+' Notes:
+'   - Uses binary compare for keys (case-sensitive).
+' =============================================================================
 Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value As Variant)
     Dim i As Long
 
@@ -630,7 +767,19 @@ End Function
 ' Public API: Excel ListObject Upsert
 ' =============================================================================
 
-' Find a ListObject by name on a worksheet, or Nothing if not found.
+' =============================================================================
+' Excel_GetListObject
+'
+' Purpose:
+'   Locate a ListObject on a worksheet by name (case-insensitive).
+'
+' Returns:
+'   - The ListObject if found
+'   - Nothing if not found
+'
+' Notes:
+'   - Only searches ws.ListObjects (does not search other sheets).
+' =============================================================================
 Public Function Excel_GetListObject(ByVal ws As Worksheet, ByVal tableName As String) As ListObject
     Dim lo As ListObject
     For Each lo In ws.ListObjects
@@ -642,8 +791,23 @@ Public Function Excel_GetListObject(ByVal ws As Worksheet, ByVal tableName As St
     Set Excel_GetListObject = Nothing
 End Function
 
-' Ensure a ListObject exists on ws with name tableName.
-' If missing, create it at topLeft with provided headers.
+' =============================================================================
+' Excel_EnsureListObject
+'
+' Purpose:
+'   Ensure a ListObject exists on ws with the given tableName.
+'   If missing, create it starting at topLeft with the provided headers.
+'
+' Parameters:
+'   headers:
+'     1D array of header names; validated for blanks and duplicates.
+'
+' Returns:
+'   The existing or newly created ListObject.
+'
+' Notes:
+'   - New table is created with a single header row range; body is empty.
+' =============================================================================
 Public Function Excel_EnsureListObject( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
@@ -672,37 +836,7 @@ Public Function Excel_EnsureListObject( _
     Set Excel_EnsureListObject = lo
 End Function
 
-' Write headers + data2D into lo with schema behavior controlled by flags.
-'
-' Schema Flags:
-'   clearExisting:
-'     True  => clear previous body, resize to exactly newBodyRows, write
-'              Re-applies preserved formula columns down entire body.
-'     False => append new rows
-'              Preserved formula columns auto-fill into appended rows only.
-'
-'   addMissingColumns:
-'     True  => keep existing header order and append incoming headers not present
-'
-'   removeMissingColumns:
-'     True  => schema becomes exactly incoming headers
-'
-' Formula Behavior:
-'   preserveFormulaColumns (default True):
-'     Detect existing formula columns (by header name) before write.
-'     After write, formulas override incoming data for those columns.
-'
-'   fillFormulasOnAppend (default True):
-'     In append mode, formulas are applied only to newly appended rows.
-'
-' Determinism:
-'   - Header matching is case-insensitive.
-'   - First-found formula per column is used as template (R1C1).
-'   - Incoming data does not replace preserved formula columns.
-'
-' Error:
-'   vbObjectError + 1101 removeMissingColumns=True requires clearExisting=True
-Public Sub Excel_ListObjectUpsertData( _
+Private Sub Excel_ListObjectUpsertData( _
     ByVal lo As ListObject, _
     ByVal headers As Variant, _
     ByVal data2D As Variant, _
@@ -852,7 +986,6 @@ CleanFail:
     Err.Raise Err.Number, Err.Source, Err.Description
 End Sub
 
-' Get or create table tableName at topLeft and upsert schema+data.
 Public Sub Excel_UpsertListObjectOnSheet( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
@@ -933,19 +1066,28 @@ Public Sub Excel_ResizeTableToRowCol( _
     End If
 End Sub
 
-' Parse jsonText, resolve tableRoot, extract array-of-object rows, convert to 2D,
-' and deterministically upsert into a ListObject.
+' =============================================================================
+' Excel_UpsertListObjectFromJsonAtRoot
 '
-' Contract:
-'   - JSON root must be object or array (Collection)
-'   - tableRoot must resolve to:
-'       Null OR array (Collection not tagged) whose elements are tagged objects
+' Purpose:
+'   Parse jsonText, resolve a tableRoot path to an array-of-objects (or null),
+'   extract rows, convert to 2D data, and upsert into an Excel ListObject.
 '
-' Errors:
-'   vbObjectError + 1130 primitive JSON root not supported
-'   vbObjectError + 1160 tableRoot not found
-'   vbObjectError + 1162 tableRoot wrong type
-'   vbObjectError + 1163 array contains non-object element
+' Key Behavior:
+'   - Table extraction is driven by tableRoot (JSONPath-like).
+'   - Nested arrays that are NOT part of the tableRoot path can be:
+'       * excluded entirely (nonTableArraysAsJson=False)
+'       * stored as JSON text in the cell (nonTableArraysAsJson=True)
+'
+' Parameters:
+'   nonTableArraysAsJson:
+'     False => exclude non-table arrays from flattening (prevents explosion)
+'     True  => stringify non-table arrays into the cell as JSON text
+'
+' Notes:
+'   - tableRoot may include indices (e.g., "$[0].items"); flattening normalizes
+'     indices away for ancestor detection, but extraction still uses the real root.
+' =============================================================================
 Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
@@ -956,7 +1098,8 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
-    Optional ByVal fillFormulasOnAppend As Boolean = True _
+    Optional ByVal fillFormulasOnAppend As Boolean = True, _
+    Optional ByVal nonTableArraysAsJson As Boolean = False _
 )
     Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
@@ -1000,8 +1143,18 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
         Next i
     End If
 
+    ' table-aware flatten:
+    '   nonTableArraysAsJson=False => exclude non-table arrays
+    '   nonTableArraysAsJson=True  => stringify non-table arrays
+    Dim arrayMode As Long
+    If nonTableArraysAsJson Then
+        arrayMode = 2
+    Else
+        arrayMode = 1
+    End If
+
     Dim flat As Collection
-    Set flat = Json_Flatten(parsed)
+    Set flat = Json_Flatten(parsed, 12, tableRoot, arrayMode)
 
     Dim rows As Collection
     Set rows = Json_ExtractTableRows(flat, tableRoot)
@@ -1647,7 +1800,15 @@ End Function
 ' Flatten internals
 ' =============================================================================
 
-Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, ByVal v As Variant, ByVal depth As Long, ByVal maxDepth As Long)
+Private Sub Json_FlattenInto( _
+    ByVal flat As Collection, _
+    ByVal prefix As String, _
+    ByVal v As Variant, _
+    ByVal depth As Long, _
+    ByVal maxDepth As Long, _
+    ByVal tableRootNorm As String, _
+    ByVal arrayMode As Long _
+)
     If depth > maxDepth Then
         AddFlat flat, IIf(Len(prefix) = 0, "$", prefix), Json_Stringify(v)
         Exit Sub
@@ -1658,6 +1819,9 @@ Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, B
         Exit Sub
     End If
 
+    ' ---------------------------
+    ' Arrays
+    ' ---------------------------
     If Json_IsArray(v) Then
         Dim arr As Collection
         Set arr = v
@@ -1665,35 +1829,95 @@ Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, B
         Dim basePath As String
         basePath = IIf(Len(prefix) = 0, "$", prefix)
 
-        Dim i As Long
-        For i = 1 To arr.count
-            Dim idxPath As String
-            idxPath = basePath & "[" & (i - 1) & "]"
+        ' Legacy: always expand arrays
+        If arrayMode = 0 Then
+            Dim i As Long
+            For i = 1 To arr.count
+                Dim idxPath As String
+                idxPath = basePath & "[" & (i - 1) & "]"
 
-            Dim elem As Variant
-            VarAssign elem, arr(i)
+                Dim elem As Variant
+                VarAssign elem, arr(i)
 
-            If IsObject(elem) Then
-                If Json_IsObject(elem) Or Json_IsArray(elem) Then
-                    Json_FlattenInto flat, idxPath, elem, depth + 1, maxDepth
+                If IsObject(elem) Then
+                    If Json_IsObject(elem) Or Json_IsArray(elem) Then
+                        Json_FlattenInto flat, idxPath, elem, depth + 1, maxDepth, tableRootNorm, arrayMode
+                    Else
+                        AddFlat flat, idxPath, Json_Stringify(elem)
+                    End If
                 Else
-                    AddFlat flat, idxPath, Json_Stringify(elem)
+                    AddFlat flat, idxPath, elem
                 End If
-            Else
-                AddFlat flat, idxPath, elem
+            Next i
+            Exit Sub
+        End If
+
+        ' Table-aware array handling (modes 1/2):
+        ' Expand ONLY arrays that are:
+        '   - the tableRoot itself (normalized), OR
+        '   - an ancestor of tableRoot (normalized)
+        Dim baseNoIdx As String
+        baseNoIdx = Json_RemoveIndices(basePath)
+
+        Dim expandThisArray As Boolean
+        expandThisArray = False
+
+        If Len(tableRootNorm) > 0 Then
+            ' Exact match: this array IS the table root
+            If StrComp(baseNoIdx, tableRootNorm, vbBinaryCompare) = 0 Then
+                expandThisArray = True
+
+            ' Ancestor match: this array is on the path TO the table root
+            ElseIf Left$(tableRootNorm, Len(baseNoIdx) + 1) = (baseNoIdx & ".") Then
+                expandThisArray = True
             End If
-        Next i
+        End If
+
+        If expandThisArray Then
+            Dim j As Long
+            For j = 1 To arr.count
+                Dim idxPath2 As String
+                idxPath2 = basePath & "[" & (j - 1) & "]"
+
+                Dim elem2 As Variant
+                VarAssign elem2, arr(j)
+
+                If IsObject(elem2) Then
+                    If Json_IsObject(elem2) Or Json_IsArray(elem2) Then
+                        Json_FlattenInto flat, idxPath2, elem2, depth + 1, maxDepth, tableRootNorm, arrayMode
+                    Else
+                        AddFlat flat, idxPath2, Json_Stringify(elem2)
+                    End If
+                Else
+                    AddFlat flat, idxPath2, elem2
+                End If
+            Next j
+            Exit Sub
+        End If
+
+        ' Not a needed table/ancestor array:
+        ' mode 1 => exclude
+        ' mode 2 => store JSON text at the array path
+        If arrayMode = 2 Then
+            AddFlat flat, basePath, Json_Stringify(arr)
+        Else
+            ' exclude
+        End If
+
         Exit Sub
     End If
 
+    ' ---------------------------
+    ' Objects
+    ' ---------------------------
     If Json_IsObject(v) Then
         Dim obj As Collection
         Set obj = v
 
-        Dim j As Long
-        For j = 2 To obj.count
+        Dim k As Long
+        For k = 2 To obj.count
             Dim pair As Variant
-            pair = obj(j)
+            pair = obj(k)
 
             Dim seg As String
             seg = Json_EscapePathSegment(CStr(pair(0)))
@@ -1710,17 +1934,18 @@ Private Sub Json_FlattenInto(ByVal flat As Collection, ByVal prefix As String, B
 
             If IsObject(child) Then
                 If Json_IsObject(child) Or Json_IsArray(child) Then
-                    Json_FlattenInto flat, nextPrefix, child, depth + 1, maxDepth
+                    Json_FlattenInto flat, nextPrefix, child, depth + 1, maxDepth, tableRootNorm, arrayMode
                 Else
                     AddFlat flat, nextPrefix, Json_Stringify(child)
                 End If
             Else
                 AddFlat flat, nextPrefix, child
             End If
-        Next j
+        Next k
         Exit Sub
     End If
 
+    ' Unknown object type => stringify leaf
     AddFlat flat, IIf(Len(prefix) = 0, "$", prefix), Json_Stringify(v)
 End Sub
 
@@ -2751,7 +2976,7 @@ End Sub
 ' JSONPath resolve (minimal, deterministic)
 ' =============================================================================
 
-Private Function Json_TryResolvePath( _
+Public Function Json_TryResolvePath( _
     ByVal root As Variant, _
     ByVal path As String, _
     ByRef outValue As Variant _
@@ -2833,7 +3058,7 @@ Private Function Json_TryResolvePath( _
     Json_TryResolvePath = True
 End Function
 
-Private Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, ByRef outValue As Variant) As Boolean
+Public Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, ByRef outValue As Variant) As Boolean
     Json_TryObjGet = False
     VarAssign outValue, Null
 
@@ -2849,7 +3074,7 @@ Private Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, By
     Next i
 End Function
 
-Private Function Json_TryReadBracketIndex(ByVal path As String, ByRef i As Long, ByRef outIndex As Long) As Boolean
+Public Function Json_TryReadBracketIndex(ByVal path As String, ByRef i As Long, ByRef outIndex As Long) As Boolean
     Json_TryReadBracketIndex = False
     outIndex = 0
 
@@ -2869,50 +3094,12 @@ Private Function Json_TryReadBracketIndex(ByVal path As String, ByRef i As Long,
     Json_TryReadBracketIndex = True
 End Function
 
-' =============================================================================
-' Excel_ListObjectToJson
-'
-' Purpose:
-'   Convert an existing ListObject into a JSON array-of-objects.
-'
-'   Reads headers + DataBodyRange and builds one tagged JSON object per row,
-'   using this engine's internal representation:
-'     - JSON Object => Collection tagged with TAG_OBJECT in slot(1),
-'                      then members as Variant(0 To 1): [key, value]
-'     - JSON Array  => Collection (NOT tagged)
-'
-' Header path rules:
-'   - "a.b.c" creates nested objects (unflatten behavior)
-'   - escape dots as "\." to mean a literal dot in a key (tokenizer/unescape)
-'   - array index paths "[0]" are NOT supported (will raise; matches unflatten contract)
-'
-' Empty cell policy:
-'   - includeBlanksAsNull=False (default): Empty/"" cells are skipped (key absent)
-'   - includeBlanksAsNull=True: Empty/"" cells become JSON null (key present)
-'
-' Determinism:
-'   - Column order is ListObject column order.
-'   - Row order is table row order.
-'
-' Errors:
-'   vbObjectError + 1120  Blank header
-'   vbObjectError + 1121  Duplicate header (case-insensitive)
-'   vbObjectError + 1170  Excel error value encountered in DataBodyRange (#N/A etc.)
-'   vbObjectError + 1171  Header count mismatch vs DataBodyRange columns (corrupt table)
-'   vbObjectError + 1172  Missing TAG_OBJECT constant (defensive sanity check)
-'   vbObjectError + 0905  Array index paths not supported by unflatten contract
-'
-' Dependencies (already in your module):
-'   - TAG_OBJECT constant
-'   - Json_TokenizePath
-'   - Json_UnescapePathSegment
-'   - Json_UnflattenInsert
-'   - Json_ObjSet
-'   - Json_Stringify
-' =============================================================================
+
 Public Function Excel_ListObjectToJson( _
     ByVal lo As ListObject, _
-    Optional ByVal includeBlanksAsNull As Boolean = False _
+    Optional ByVal includeBlanksAsNull As Boolean = False, _
+    Optional ByVal parseJsonInCells As Boolean = False, _
+    Optional ByVal parseArraysOnly As Boolean = False _
 ) As String
 
     Const SRC As String = "Excel_ListObjectToJson"
@@ -3011,29 +3198,50 @@ Public Function Excel_ListObjectToJson( _
 
             If isBlank Then
                 If includeBlanksAsNull Then
-                    ' Insert explicit null
-                    Dim toksN As Collection
-                    Set toksN = Json_TokenizePath(keyPath)
-
-                    If toksN.count > 1 Then
-                        Json_UnflattenInsert rowObj, keyPath, Null
-                    Else
-                        Json_ObjSet rowObj, Json_UnescapePathSegment(CStr(toksN(1))), Null
-                    End If
+                    Excel_ListObjectToJson_InsertValue rowObj, keyPath, Null
                 Else
                     ' Skip key entirely (absent)
                 End If
             Else
-                ' Insert value
-                Dim toks As Collection
-                Set toks = Json_TokenizePath(keyPath)
 
-                If toks.count > 1 Then
-                    Json_UnflattenInsert rowObj, keyPath, v
-                Else
-                    ' Single segment (even if it contains "\." escapes) is a flat key.
-                    Json_ObjSet rowObj, Json_UnescapePathSegment(CStr(toks(1))), v
+                Dim vv As Variant
+                vv = v
+
+                ' Optional: parse JSON text in cells into real array/object nodes.
+                If parseJsonInCells Then
+                    If VarType(vv) = vbString Then
+                        Dim s As String
+                        s = Trim$(CStr(vv))
+
+                        If Len(s) > 0 Then
+                            Dim firstCh As String
+                            firstCh = Left$(s, 1)
+
+                            Dim looksJson As Boolean
+                            If parseArraysOnly Then
+                                looksJson = (firstCh = "[")
+                            Else
+                                looksJson = (firstCh = "[" Or firstCh = "{")
+                            End If
+
+                            If looksJson Then
+                                Dim parsedCell As Variant
+                                If Excel_ListObjectToJson_TryParseJsonCell(s, parsedCell) Then
+                                    ' Only embed object/array; primitives remain as literal cell value.
+                                    If IsObject(parsedCell) Then
+                                        If TypeName(parsedCell) = "Collection" Then
+                                            If Json_IsObject(parsedCell) Or Json_IsArray(parsedCell) Then
+                                                VarAssign vv, parsedCell
+                                            End If
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        End If
+                    End If
                 End If
+
+                Excel_ListObjectToJson_InsertValue rowObj, keyPath, vv
             End If
 
         Next c
@@ -3042,6 +3250,45 @@ Public Function Excel_ListObjectToJson( _
     Next r
 
     Excel_ListObjectToJson = Json_Stringify(arr)
+End Function
+
+Private Sub Excel_ListObjectToJson_InsertValue( _
+    ByVal rowObj As Collection, _
+    ByVal keyPath As String, _
+    ByVal value As Variant _
+)
+    Dim toks As Collection
+    Set toks = Json_TokenizePath(keyPath)
+
+    If toks.count > 1 Then
+        Json_UnflattenInsert rowObj, keyPath, value
+    Else
+        Json_ObjSet rowObj, Json_UnescapePathSegment(CStr(toks(1))), value
+    End If
+End Sub
+
+Private Function Excel_ListObjectToJson_TryParseJsonCell( _
+    ByVal s As String, _
+    ByRef outValue As Variant _
+) As Boolean
+    ' Parse cell text as JSON, but never throw from here.
+    ' Return True only when parse succeeded.
+    Excel_ListObjectToJson_TryParseJsonCell = False
+    VarAssign outValue, Null
+
+    On Error GoTo Fail
+
+    ' Must use the engine parser so you get the same deterministic model.
+    Dim v As Variant
+    Json_ParseInto s, v
+
+    VarAssign outValue, v
+    Excel_ListObjectToJson_TryParseJsonCell = True
+    Exit Function
+
+Fail:
+    ' swallow parse errors: treat as ordinary string cell
+    Err.Clear
 End Function
 
 ' =============================================================================
