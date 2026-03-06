@@ -237,60 +237,154 @@ Excel_UpsertListObjectFromJsonAtRoot _
 ``` vba
 Public Sub Example_Api_Refresh()
 
+    '--------------------------------------------------------------------------
+    ' Example_Api_Refresh
+    '
+    ' Demonstrates a full JSON ? Excel relational materialization pipeline.
+    '
+    ' Steps:
+    '   1. Fetch JSON from remote API
+    '   2. Materialize primary table (products) into tUsers
+    '   3. Iterate rows to extract nested "reviews" arrays
+    '   4. Inject foreign key (parentId) into each review object
+    '   5. Materialize child table (tReviews)
+    '   6. Apply presentation formulas
+    '
+    ' Notes:
+    '   - Uses deterministic JSON parser + Excel upsert engine
+    '   - Avoids schema drift and maintains stable column ordering
+    '--------------------------------------------------------------------------
+
+    On Error GoTo CleanFail
+
+    ' Improve performance during bulk operations
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
+    ' Target worksheet
     Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Quick Start")
-    Dim jsonText As String: jsonText = HttpGetText("https://dummyjson.com/products")
 
-    ' 1. Load primary table (tUsers)
+    '--------------------------------------------------------------------------
+    ' Step 1: Retrieve JSON payload from API
+    '--------------------------------------------------------------------------
+    Dim jsonText As String
+    jsonText = HttpGetText("https://dummyjson.com/products")
+
+    '--------------------------------------------------------------------------
+    ' Step 2: Materialize primary table (products)
+    '
+    ' Root: $.products
+    ' Destination: ListObject "tUsers"
+    '--------------------------------------------------------------------------
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers", ws.Range("A1"), _
         jsonText, "$.products", _
         True, True, False, True, True, True
-    
+
+    ' Reference the newly populated table
     Dim lo As ListObject: Set lo = ws.ListObjects("tUsers")
-    Dim rw As ListRow, reviewsColl As Collection, reviewObj As Object
-    
-    ' --- Setup the First Row Flag ---
-    Dim isFirstPass As Boolean: isFirstPass = True
 
-    ' 2. Iterate through rows to unpack nested reviews
-    For Each rw In lo.ListRows
-        Dim parentId As Variant: parentId = rw.Range.Columns(lo.ListColumns("id").Index).value
-        Dim reviewsJson As String: reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
-        
-        ' Object-Oriented Guard Check
-        Json_ParseInto reviewsJson, reviewsColl
-        
-        If Not reviewsColl Is Nothing Then
-            If reviewsColl.count > 0 Then
-                
-                ' Inject parentId into each review object in memory
-                For Each reviewObj In reviewsColl
-                    Json_ObjSet reviewObj, "parentId", parentId
-                Next
-                
-                ' Convert enriched collection back to string
-                reviewsJson = Json_Stringify(reviewsColl)
+    '--------------------------------------------------------------------------
+    ' Step 3: Prepare reviews table (child table)
+    '
+    ' If it already exists, clear the body before repopulating
+    '--------------------------------------------------------------------------
+    Dim loReviews As ListObject
 
-                ' Upsert: flush only on the very first successful data pass
-                Excel_UpsertListObjectFromJsonAtRoot _
-                    ws, "tReviews", ws.Range("A35"), _
-                    reviewsJson, "$", _
-                    isFirstPass, True, False, True, True, True
-                
-                ' Flip the flag after the first successful upsert
-                isFirstPass = False
-                    
-            End If
+    On Error Resume Next
+    Set loReviews = ws.ListObjects("tReviews")
+    On Error GoTo 0
+
+    If Not loReviews Is Nothing Then
+        If Not loReviews.DataBodyRange Is Nothing Then
+            loReviews.DataBodyRange.Delete
         End If
+    End If
+
+    '--------------------------------------------------------------------------
+    ' Step 4: Iterate parent rows to extract nested review arrays
+    '--------------------------------------------------------------------------
+    Dim rw As ListRow
+    Dim reviewsColl As Collection
+    Dim reviewObj As Object
+
+    For Each rw In lo.ListRows
+
+        ' Parent product ID (used as foreign key)
+        Dim parentId As Variant
+        parentId = rw.Range.Columns(lo.ListColumns("id").Index).value
+
+        ' Nested reviews JSON stored as string
+        Dim reviewsJson As String
+        reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
+
+        ' Skip empty values
+        If Len(reviewsJson) > 0 Then
+
+            ' Parse JSON array into collection
+            Set reviewsColl = Nothing
+            Json_ParseInto reviewsJson, reviewsColl
+
+            ' Ensure parsed array contains elements
+            If Not reviewsColl Is Nothing Then
+                If reviewsColl.count > 0 Then
+
+                    '----------------------------------------------------------
+                    ' Inject parentId into each review object
+                    ' (relational foreign key)
+                    '----------------------------------------------------------
+                    For Each reviewObj In reviewsColl
+                        Json_ObjSet reviewObj, "parentId", parentId
+                    Next
+
+                    ' Convert enriched collection back to JSON
+                    reviewsJson = Json_Stringify(reviewsColl)
+
+                    '----------------------------------------------------------
+                    ' Step 5: Materialize child table (reviews)
+                    '
+                    ' Root: $
+                    ' Destination: ListObject "tReviews"
+                    '----------------------------------------------------------
+                    Excel_UpsertListObjectFromJsonAtRoot _
+                        ws, "tReviews", ws.Range("A35"), _
+                        reviewsJson, "$", _
+                        False, True, False, True, True, True
+
+                End If
+            End If
+
+        End If
+
     Next
 
+    '--------------------------------------------------------------------------
+    ' Step 6: Apply presentation formulas
+    '
+    ' Converts UTC timestamps from API into Pacific Time with DST handling
+    '--------------------------------------------------------------------------
+    Set loReviews = ws.ListObjects("tReviews")
+
+    loReviews.ListColumns("date (Pacific)").DataBodyRange.Formula = _
+        "=LET(utc,--SUBSTITUTE(LEFT([@date],19),""T"","" "")," & _
+        "y,YEAR(utc)," & _
+        "dstStartUTC,DATE(y,3,14)-WEEKDAY(DATE(y,3,14)-1)+10/24," & _
+        "dstEndUTC,DATE(y,11,7)-WEEKDAY(DATE(y,11,7)-1)+9/24," & _
+        "utc+IF((utc>=dstStartUTC)*(utc<dstEndUTC),-7/24,-8/24))"
+
+CleanExit:
+
+    ' Restore Excel environment
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     Application.Calculation = xlCalculationAutomatic
+    Exit Sub
+
+CleanFail:
+
+    ' Ensure environment is restored even if an error occurs
+    Resume CleanExit
 
 End Sub
 ```
