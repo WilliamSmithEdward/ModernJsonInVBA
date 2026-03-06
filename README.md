@@ -3,7 +3,6 @@
 **Deterministic JSON → Excel Tables → JSON**  
 Pure VBA. No dependencies. No silent schema drift.
 
-\
 [![GitHub stars](https://img.shields.io/github/stars/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
