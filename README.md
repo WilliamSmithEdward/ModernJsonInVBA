@@ -237,43 +237,60 @@ Excel_UpsertListObjectFromJsonAtRoot _
 ``` vba
 Public Sub Example_Api_Refresh()
 
-Application.ScreenUpdating = False
-Application.EnableEvents = False
-Application.Calculation = xlCalculationManual
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
 
     Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Quick Start")
     Dim jsonText As String: jsonText = HttpGetText("https://dummyjson.com/products")
 
-    ' Load primary table
+    ' 1. Load primary table (tUsers)
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers", ws.Range("A1"), _
         jsonText, "$.products", _
         True, True, False, True, True, True
-
+    
     Dim lo As ListObject: Set lo = ws.ListObjects("tUsers")
     Dim rw As ListRow, reviewsColl As Collection, reviewObj As Object
     
+    ' --- Setup the First Row Flag ---
+    Dim isFirstPass As Boolean: isFirstPass = True
+
+    ' 2. Iterate through rows to unpack nested reviews
     For Each rw In lo.ListRows
         Dim parentId As Variant: parentId = rw.Range.Columns(lo.ListColumns("id").Index).value
         Dim reviewsJson As String: reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
         
-        ' --- Inject parentId for relational mapping ---
+        ' Object-Oriented Guard Check
         Json_ParseInto reviewsJson, reviewsColl
-        For Each reviewObj In reviewsColl
-            Json_ObjSet reviewObj, "parentId", parentId
-        Next
-        reviewsJson = Json_Stringify(reviewsColl)
-        ' ---------------------------
+        
+        If Not reviewsColl Is Nothing Then
+            If reviewsColl.count > 0 Then
+                
+                ' Inject parentId into each review object in memory
+                For Each reviewObj In reviewsColl
+                    Json_ObjSet reviewObj, "parentId", parentId
+                Next
+                
+                ' Convert enriched collection back to string
+                reviewsJson = Json_Stringify(reviewsColl)
 
-        Excel_UpsertListObjectFromJsonAtRoot _
-            ws, "tReviews", ws.Range("A35"), _
-            reviewsJson, "$", _
-            IIf(rw.Index = 1, True, False), True, False, True, True, True
+                ' Upsert: flush only on the very first successful data pass
+                Excel_UpsertListObjectFromJsonAtRoot _
+                    ws, "tReviews", ws.Range("A35"), _
+                    reviewsJson, "$", _
+                    isFirstPass, True, False, True, True, True
+                
+                ' Flip the flag after the first successful upsert
+                isFirstPass = False
+                    
+            End If
+        End If
     Next
 
-Application.ScreenUpdating = True
-Application.EnableEvents = True
-Application.Calculation = xlCalculationAutomatic
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
 
 End Sub
 ```
