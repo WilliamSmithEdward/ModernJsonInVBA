@@ -19,6 +19,7 @@ Pure VBA. No dependencies. No silent schema drift.
   - [Refresh Mode](#refresh-mode)
   - [Append Mode](#append-mode)
   - [Strict Schema Mode](#strict-schema-mode)
+  - [API Example With Nested Objects](#api-example-with-nested-objects)
 - [Accessing Json Elements (Directly in VBA)](#accessing-json-elements-directly-in-vba)
 - [Excel_UpsertListObjectFromJsonAtRoot](#excel_upsertlistobjectfromjsonatroot)
 - [Excel to JSON (Reverse Materialization)](#excel-to-json-reverse-materialization)
@@ -232,9 +233,13 @@ Excel_UpsertListObjectFromJsonAtRoot _
 
 ------------------------------------------------------------------------
 
-## API Example With Nested Objects
+### API Example With Nested Objects
 ``` vba
 Public Sub Example_Api_Refresh()
+
+Application.ScreenUpdating = False
+Application.EnableEvents = False
+Application.Calculation = xlCalculationManual
 
     Dim ws As Worksheet
     Set ws = ThisWorkbook.Sheets("Quick Start")
@@ -263,6 +268,10 @@ Public Sub Example_Api_Refresh()
         IIf(rw.Index = 1, True, False), True, False, True, True, True
     
     Next
+
+Application.ScreenUpdating = True
+Application.EnableEvents = True
+Application.Calculation = xlCalculationAutomatic
 
 End Sub
 ```
