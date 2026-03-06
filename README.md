@@ -241,32 +241,34 @@ Application.ScreenUpdating = False
 Application.EnableEvents = False
 Application.Calculation = xlCalculationManual
 
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets("Quick Start")
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Quick Start")
+    Dim jsonText As String: jsonText = HttpGetText("https://dummyjson.com/products")
 
-    Dim jsonText As String
-    jsonText = HttpGetText("https://dummyjson.com/products")
-
-    'Clear existing values, add missing columns from JSON, preserve columns not found in JSON, preserve existing formulas
+    ' Load primary table
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tUsers", ws.Range("A1"), _
         jsonText, "$.products", _
         True, True, False, True, True, True
 
-    Dim lo As ListObject
-    Set lo = ws.ListObjects("tUsers")
+    Dim lo As ListObject: Set lo = ws.ListObjects("tUsers")
+    Dim rw As ListRow, reviewsColl As Collection, reviewObj As Object
     
-    'Loop through table rows. For each json string in the "reviews" column, append to a second table (flush the table on the first row).
     For Each rw In lo.ListRows
+        Dim parentId As Variant: parentId = rw.Range.Columns(lo.ListColumns("id").Index).value
+        Dim reviewsJson As String: reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
         
-        Dim reviewsJson As String
-        reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
-        
+        ' --- Inject parentId for relational mapping ---
+        Json_ParseInto reviewsJson, reviewsColl
+        For Each reviewObj In reviewsColl
+            Json_ObjSet reviewObj, "parentId", parentId
+        Next
+        reviewsJson = Json_Stringify(reviewsColl)
+        ' ---------------------------
+
         Excel_UpsertListObjectFromJsonAtRoot _
-        ws, "tReviews", ws.Range("A35"), _
-        reviewsJson, "$", _
-        IIf(rw.Index = 1, True, False), True, False, True, True, True
-    
+            ws, "tReviews", ws.Range("A35"), _
+            reviewsJson, "$", _
+            IIf(rw.Index = 1, True, False), True, False, True, True, True
     Next
 
 Application.ScreenUpdating = True
