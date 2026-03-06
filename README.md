@@ -130,7 +130,7 @@ Excel ListObject Upsert
 
 **Payload:** 55,040 bytes  
 **Rows:** 100  
-**Columns:** 15  
+**Columns:** 4 
 **Throughput:** **2133.33 rows/sec**
 
 ## Installation
@@ -188,7 +188,7 @@ This endpoint returns a root array. `tableRoot` is `$`.
 
 ### Refresh Mode
 
-``` vb
+``` vba
 Public Sub Example_Api_Refresh()
 
     Dim ws As Worksheet
@@ -214,7 +214,7 @@ End Sub
 
 ### Append Mode
 
-``` vb
+``` vba
 Excel_UpsertListObjectFromJsonAtRoot _
     ws, "tUsersLog", ws.Range("A1"), _
     jsonText, "$", _
@@ -223,7 +223,7 @@ Excel_UpsertListObjectFromJsonAtRoot _
 
 ### Strict Schema Mode
 
-``` vb
+``` vba
 Excel_UpsertListObjectFromJsonAtRoot _
     ws, "tUsersStrict", ws.Range("A1"), _
     jsonText, "$", _
@@ -232,9 +232,46 @@ Excel_UpsertListObjectFromJsonAtRoot _
 
 ------------------------------------------------------------------------
 
+## API Example With Nested Objects
+``` vba
+Public Sub Example_Api_Refresh()
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Quick Start")
+
+    Dim jsonText As String
+    jsonText = HttpGetText("https://dummyjson.com/products")
+
+    'Clear existing values, add missing columns from JSON, preserve columns not found in JSON, preserve existing formulas
+    Excel_UpsertListObjectFromJsonAtRoot _
+        ws, "tUsers", ws.Range("A1"), _
+        jsonText, "$.products", _
+        True, True, False, True, True, True
+
+    Dim lo As ListObject
+    Set lo = ws.ListObjects("tUsers")
+    
+    'Loop through table rows. For each json string in the "reviews" column, append to a second table (flush the table on the first row).
+    For Each rw In lo.ListRows
+        
+        Dim reviewsJson As String
+        reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
+        
+        Excel_UpsertListObjectFromJsonAtRoot _
+        ws, "tReviews", ws.Range("A35"), _
+        reviewsJson, "$", _
+        IIf(rw.Index = 1, True, False), True, False, True, True, True
+    
+    Next
+
+End Sub
+```
+
+------------------------------------------------------------------------
+
 ### HTTP Helper (Windows)
 
-``` vb
+``` vba
 Private Function HttpGetText(ByVal url As String) As String
 
     Dim http As Object
@@ -250,6 +287,29 @@ Private Function HttpGetText(ByVal url As String) As String
     End If
 
     HttpGetText = CStr(http.responseText)
+
+End Function
+```
+
+### HTTP Helper (Mac)
+
+```vba
+Private Function HttpGetTextMac(ByVal url As String) As String
+
+    Dim cmd As String
+    Dim result As String
+    
+    ' Use curl (installed on all modern macOS systems)
+    cmd = "curl -s -L -H ""Accept: application/json"" """ & url & """"
+    
+    result = MacScript("do shell script " & Chr(34) & cmd & Chr(34))
+    
+    If Len(result) = 0 Then
+        Err.Raise vbObjectError + 1500, "HttpGetTextMac", _
+            "HTTP request returned empty response | " & url
+    End If
+    
+    HttpGetTextMac = result
 
 End Function
 ```
