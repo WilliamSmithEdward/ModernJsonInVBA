@@ -331,11 +331,17 @@ Public Sub Example_Api_Refresh()
                 If reviewsColl.count > 0 Then
 
                     '----------------------------------------------------------
-                    ' Inject parentId into each review object
-                    ' (relational foreign key)
+                    ' Inject parentId into each review object (relational foreign key)
+                    ' Inject ISO date conversion formula
                     '----------------------------------------------------------
                     For Each reviewObj In reviewsColl
                         Json_ObjSet reviewObj, "parentId", parentId
+                        Json_ObjSet reviewObj, "date (Pacific)", _
+                            "=LET(utc,--SUBSTITUTE(LEFT([@date],19),""T"","" "")," & _
+                            "y,YEAR(utc)," & _
+                            "dstStartUTC,DATE(y,3,14)-WEEKDAY(DATE(y,3,14)-1)+10/24," & _
+                            "dstEndUTC,DATE(y,11,7)-WEEKDAY(DATE(y,11,7)-1)+9/24," & _
+                            "utc+IF((utc>=dstStartUTC)*(utc<dstEndUTC),-7/24,-8/24))"
                     Next
 
                     ' Convert enriched collection back to JSON
@@ -358,20 +364,6 @@ Public Sub Example_Api_Refresh()
         End If
 
     Next
-
-    '--------------------------------------------------------------------------
-    ' Step 6: Apply presentation formulas
-    '
-    ' Converts UTC timestamps from API into Pacific Time with DST handling
-    '--------------------------------------------------------------------------
-    Set loReviews = ws.ListObjects("tReviews")
-
-    loReviews.ListColumns("date (Pacific)").DataBodyRange.Formula = _
-        "=LET(utc,--SUBSTITUTE(LEFT([@date],19),""T"","" "")," & _
-        "y,YEAR(utc)," & _
-        "dstStartUTC,DATE(y,3,14)-WEEKDAY(DATE(y,3,14)-1)+10/24," & _
-        "dstEndUTC,DATE(y,11,7)-WEEKDAY(DATE(y,11,7)-1)+9/24," & _
-        "utc+IF((utc>=dstStartUTC)*(utc<dstEndUTC),-7/24,-8/24))"
 
 CleanExit:
 
