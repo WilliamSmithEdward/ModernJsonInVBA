@@ -244,11 +244,10 @@ Public Sub Example_Api_Refresh()
     '
     ' Steps:
     '   1. Fetch JSON from remote API
-    '   2. Materialize primary table (products) into tUsers
+    '   2. Materialize primary table (products) into tProducts
     '   3. Iterate rows to extract nested "reviews" arrays
     '   4. Inject foreign key (parentId) into each review object
     '   5. Materialize child table (tReviews)
-    '   6. Apply presentation formulas
     '
     ' Notes:
     '   - Uses deterministic JSON parser + Excel upsert engine
@@ -275,15 +274,15 @@ Public Sub Example_Api_Refresh()
     ' Step 2: Materialize primary table (products)
     '
     ' Root: $.products
-    ' Destination: ListObject "tUsers"
+    ' Destination: ListObject "tProducts"
     '--------------------------------------------------------------------------
     Excel_UpsertListObjectFromJsonAtRoot _
-        ws, "tUsers", ws.Range("A1"), _
+        ws, "tProducts", ws.Range("A1"), _
         jsonText, "$.products", _
         True, True, False, True, True, True
 
     ' Reference the newly populated table
-    Dim lo As ListObject: Set lo = ws.ListObjects("tUsers")
+    Dim lo As ListObject: Set lo = ws.ListObjects("tProducts")
 
     '--------------------------------------------------------------------------
     ' Step 3: Prepare reviews table (child table)
