@@ -5,6 +5,7 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON**  
+\
 Pure VBA. No dependencies. No silent schema drift.
 
 ------------------------------------------------------------------------
