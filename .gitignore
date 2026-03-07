@@ -1,0 +1,9 @@
+# Excel temp files
+~$*.xls*
+
+# Excel autosave / backup
+*.xlk
+
+# OS noise
+.DS_Store
+Thumbs.db
