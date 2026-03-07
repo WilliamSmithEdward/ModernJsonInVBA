@@ -58,6 +58,7 @@ See the .XLSM file for:
 -   Examples
 -   Performance Testing
 -   A Quick Start Module
+-   CSV / XML --> Json Pipeline
 
 ------------------------------------------------------------------------
 
