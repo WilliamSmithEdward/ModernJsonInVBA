@@ -238,6 +238,9 @@ Excel_UpsertListObjectFromJsonAtRoot _
 ------------------------------------------------------------------------
 
 ### API Example With Nested Objects
+
+Also see: [API Product Intelligence Demo Case Study](https://github.com/WilliamSmithEdward/APIProductIntelligenceDemo)
+
 ``` vba
 Public Sub Example_Api_Refresh()
 
