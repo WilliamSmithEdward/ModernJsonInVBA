@@ -3277,6 +3277,13 @@ Public Function Excel_ListObjectToJson( _
     ' -----------------------------
     Dim data As Variant
     data = lo.DataBodyRange.Value2
+    
+    ' Excel returns scalar for 1x1 range
+    If Not IsArray(data) Then
+        Dim tmp(1 To 1, 1 To 1) As Variant
+        tmp(1, 1) = data
+        data = tmp
+    End If
 
     Dim rowCount As Long
     rowCount = UBound(data, 1) - LBound(data, 1) + 1
