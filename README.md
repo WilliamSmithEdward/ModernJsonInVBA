@@ -4,11 +4,11 @@
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Deterministic JSON (and CSV / XML) → Excel Tables → JSON**  
+**Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
 Pure VBA. No dependencies. No silent schema drift.  
 \
-Take nested or complex API payloads and easily convert them into normalized Excel tables, with parent keys preserved and support for formulas and scalar value injection.
+Take nested or complex API payloads and easily convert them into normalized Excel tables with parent keys preserved. Supports Excel formula and scalar value injection.
 
 ------------------------------------------------------------------------
 
