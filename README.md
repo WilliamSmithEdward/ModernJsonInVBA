@@ -8,7 +8,7 @@
 \
 Pure VBA. No dependencies. No silent schema drift.  
 \
-Take nested or complex API payloads and easily convert them into normalized Excel tables with parent keys preserved and formula / raw string injection support.
+Take nested or complex API payloads and easily convert them into normalized Excel tables, with parent keys preserved and support for formulas or raw JSON, XML, CSV, or scalar value injection.
 
 ------------------------------------------------------------------------
 
