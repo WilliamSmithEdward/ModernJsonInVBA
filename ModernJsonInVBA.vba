@@ -35,7 +35,7 @@ Private Const ERR_SRC As String = "zz_ModernJsonInVBA"
 ' =============================================================================
 
 Private Type JsonReader
-    Text As String
+    text As String
     pos As Long ' 1-based, next char to read
 End Type
 
@@ -47,6 +47,16 @@ Private Type RowKeyMap
     rowObjs() As Collection    ' 1-based
     count As Long
 End Type
+
+' =============================================================================
+' Enums
+' =============================================================================
+
+Public Enum ExcelSourceFormat
+    ExcelSourceFormat_JSON = 1
+    ExcelSourceFormat_CSV = 2
+    ExcelSourceFormat_XML = 3
+End Enum
 
 ' =============================================================================
 ' Public API: JSON Parse
@@ -562,42 +572,43 @@ End Function
 '   - Uses binary compare for keys (case-sensitive).
 ' =============================================================================
 Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value As Variant)
-    Dim i As Long
 
+    Dim i As Long
     Dim vv As Variant
+
     If IsObject(value) Then
         Set vv = value
     Else
         vv = value
     End If
 
-    ' overwrite if present
     For i = 2 To obj.count
+
         Dim entry As Variant
         entry = obj(i)
 
         If IsArray(entry) Then
-            Dim lb As Long
-            lb = LBound(entry)
-            If CStr(entry(lb)) = key Then
+
+            If CStr(entry(LBound(entry))) = key Then
+
                 obj.Remove i
-                obj.Add Array(key, vv), , i
+
+                If i - 1 >= 1 Then
+                    obj.Add Array(key, vv), , , i - 1
+                Else
+                    obj.Add Array(key, vv), , 2
+                End If
+
                 Exit Sub
+
             End If
 
-        ElseIf IsObject(entry) And TypeName(entry) = "Collection" Then
-            If entry.count >= 1 Then
-                If CStr(entry(1)) = key Then
-                    obj.Remove i
-                    obj.Add Array(key, vv), , i
-                    Exit Sub
-                End If
-            End If
         End If
+
     Next i
 
-    ' append
     obj.Add Array(key, vv)
+
 End Sub
 
 ' Convert a Collection of tagged row objects into:
@@ -783,7 +794,7 @@ End Function
 Public Function Excel_GetListObject(ByVal ws As Worksheet, ByVal tableName As String) As ListObject
     Dim lo As ListObject
     For Each lo In ws.ListObjects
-        If StrComp(lo.Name, tableName, vbTextCompare) = 0 Then
+        If StrComp(lo.name, tableName, vbTextCompare) = 0 Then
             Set Excel_GetListObject = lo
             Exit Function
         End If
@@ -830,7 +841,7 @@ Public Function Excel_EnsureListObject( _
         headerRange.Value2 = Excel_HeadersTo2D(headers)
 
         Set lo = ws.ListObjects.Add(SourceType:=xlSrcRange, Source:=headerRange, XlListObjectHasHeaders:=xlYes)
-        lo.Name = tableName
+        lo.name = tableName
     End If
 
     Set Excel_EnsureListObject = lo
@@ -1027,7 +1038,7 @@ Public Sub Excel_ResizeTableToRowCol( _
     If Not lo.ShowHeaders Then lo.ShowHeaders = True
     If lo.HeaderRowRange Is Nothing Then
         Err.Raise vbObjectError + 1140, "Excel_ResizeTableToRowCol", _
-            "ListObject has no HeaderRowRange (headers hidden or table corrupted): " & lo.Name
+            "ListObject has no HeaderRowRange (headers hidden or table corrupted): " & lo.name
     End If
 
     Dim headerTopLeft As Range
@@ -1101,7 +1112,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
     Optional ByVal nonTableArraysAsJson As Boolean = False _
 )
-    Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
+    Const src As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
     On Error GoTo Fail
 
@@ -1109,20 +1120,20 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Json_ParseInto jsonText, parsed
 
     If (Not IsObject(parsed)) Or (TypeName(parsed) <> "Collection") Then
-        Err.Raise vbObjectError + 1130, SRC, _
+        Err.Raise vbObjectError + 1130, src, _
             "JSON root must be an object or array (Collection). Primitive root is not supported for table upsert."
     End If
 
     Dim resolved As Variant
     If Not Json_TryResolvePath(parsed, tableRoot, resolved) Then
-        Err.Raise vbObjectError + 1160, SRC, "tableRoot not found: " & tableRoot
+        Err.Raise vbObjectError + 1160, src, "tableRoot not found: " & tableRoot
     End If
 
     If Not IsNull(resolved) Then
         If (Not IsObject(resolved)) _
             Or (TypeName(resolved) <> "Collection") _
             Or Json_IsObject(resolved) Then
-            Err.Raise vbObjectError + 1162, SRC, _
+            Err.Raise vbObjectError + 1162, src, _
                 "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
         End If
 
@@ -1137,7 +1148,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
             If (Not IsObject(elem)) _
                 Or (TypeName(elem) <> "Collection") _
                 Or (Not Json_IsObject(elem)) Then
-                Err.Raise vbObjectError + 1163, SRC, _
+                Err.Raise vbObjectError + 1163, src, _
                     "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
             End If
         Next i
@@ -1193,11 +1204,11 @@ Fail:
     Dim s As String: s = Err.Source
 
     Err.Clear
-    If Len(s) > 0 And StrComp(s, SRC, vbBinaryCompare) <> 0 Then
+    If Len(s) > 0 And StrComp(s, src, vbBinaryCompare) <> 0 Then
         d = d & " | inner_source=" & s
     End If
 
-    Err.Raise n, SRC, d
+    Err.Raise n, src, d
 End Sub
 
 ' =============================================================================
@@ -1205,19 +1216,19 @@ End Sub
 ' =============================================================================
 
 Private Sub JR_Init(ByRef r As JsonReader, ByVal jsonText As String)
-    r.Text = jsonText
+    r.text = jsonText
     r.pos = 1
 End Sub
 
 Private Function JR_Eof(ByRef r As JsonReader) As Boolean
-    JR_Eof = (r.pos > Len(r.Text))
+    JR_Eof = (r.pos > Len(r.text))
 End Function
 
 Private Function JR_Peek(ByRef r As JsonReader) As String
     If JR_Eof(r) Then
         JR_Peek = vbNullString
     Else
-        JR_Peek = Mid$(r.Text, r.pos, 1)
+        JR_Peek = Mid$(r.text, r.pos, 1)
     End If
 End Function
 
@@ -1349,14 +1360,14 @@ Private Function JR_ReadNumber(ByRef r As JsonReader) As Variant
     End If
 
     Dim numText As String
-    numText = Mid$(r.Text, startPos, r.pos - startPos)
+    numText = Mid$(r.text, startPos, r.pos - startPos)
 
     If InStr(1, numText, ".", vbBinaryCompare) = 0 And InStr(1, numText, "e", vbTextCompare) = 0 Then
         On Error Resume Next
-        Dim l As Long
-        l = CLng(numText)
+        Dim L As Long
+        L = CLng(numText)
         If Err.Number = 0 Then
-            JR_ReadNumber = l
+            JR_ReadNumber = L
             Exit Function
         End If
         Err.Clear
@@ -1809,6 +1820,7 @@ Private Sub Json_FlattenInto( _
     ByVal tableRootNorm As String, _
     ByVal arrayMode As Long _
 )
+
     If depth > maxDepth Then
         AddFlat flat, IIf(Len(prefix) = 0, "$", prefix), Json_Stringify(v)
         Exit Sub
@@ -1819,20 +1831,23 @@ Private Sub Json_FlattenInto( _
         Exit Sub
     End If
 
-    ' ---------------------------
-    ' Arrays
-    ' ---------------------------
+    ' ----------------------------------------------------
+    ' ARRAYS
+    ' ----------------------------------------------------
     If Json_IsArray(v) Then
+
         Dim arr As Collection
         Set arr = v
 
         Dim basePath As String
         basePath = IIf(Len(prefix) = 0, "$", prefix)
 
-        ' Legacy: always expand arrays
+        ' legacy behavior
         If arrayMode = 0 Then
+
             Dim i As Long
             For i = 1 To arr.count
+
                 Dim idxPath As String
                 idxPath = basePath & "[" & (i - 1) & "]"
 
@@ -1848,34 +1863,44 @@ Private Sub Json_FlattenInto( _
                 Else
                     AddFlat flat, idxPath, elem
                 End If
+
             Next i
+
             Exit Sub
+
         End If
 
-        ' Table-aware array handling (modes 1/2):
-        ' Expand ONLY arrays that are:
-        '   - the tableRoot itself (normalized), OR
-        '   - an ancestor of tableRoot (normalized)
+
+        ' ----------------------------------------------------
+        ' table-aware logic
+        ' ----------------------------------------------------
+
         Dim baseNoIdx As String
         baseNoIdx = Json_RemoveIndices(basePath)
 
-        Dim expandThisArray As Boolean
-        expandThisArray = False
+        Dim expandArray As Boolean
+        expandArray = False
 
         If Len(tableRootNorm) > 0 Then
-            ' Exact match: this array IS the table root
-            If StrComp(baseNoIdx, tableRootNorm, vbBinaryCompare) = 0 Then
-                expandThisArray = True
 
-            ' Ancestor match: this array is on the path TO the table root
+            ' EXACT table root
+            If StrComp(baseNoIdx, tableRootNorm, vbBinaryCompare) = 0 Then
+                expandArray = True
+
+            ' ancestor of table root
             ElseIf Left$(tableRootNorm, Len(baseNoIdx) + 1) = (baseNoIdx & ".") Then
-                expandThisArray = True
+                expandArray = True
+
             End If
+
         End If
 
-        If expandThisArray Then
+
+        If expandArray Then
+
             Dim j As Long
             For j = 1 To arr.count
+
                 Dim idxPath2 As String
                 idxPath2 = basePath & "[" & (j - 1) & "]"
 
@@ -1891,31 +1916,34 @@ Private Sub Json_FlattenInto( _
                 Else
                     AddFlat flat, idxPath2, elem2
                 End If
-            Next j
-            Exit Sub
-        End If
 
-        ' Not a needed table/ancestor array:
-        ' mode 1 => exclude
-        ' mode 2 => store JSON text at the array path
-        If arrayMode = 2 Then
-            AddFlat flat, basePath, Json_Stringify(arr)
+            Next j
+
         Else
-            ' exclude
+
+            ' array not part of table root path
+            If arrayMode = 2 Then
+                AddFlat flat, basePath, Json_Stringify(arr)
+            End If
+
         End If
 
         Exit Sub
+
     End If
 
-    ' ---------------------------
-    ' Objects
-    ' ---------------------------
+
+    ' ----------------------------------------------------
+    ' OBJECTS
+    ' ----------------------------------------------------
     If Json_IsObject(v) Then
+
         Dim obj As Collection
         Set obj = v
 
         Dim k As Long
         For k = 2 To obj.count
+
             Dim pair As Variant
             pair = obj(k)
 
@@ -1941,12 +1969,17 @@ Private Sub Json_FlattenInto( _
             Else
                 AddFlat flat, nextPrefix, child
             End If
+
         Next k
+
         Exit Sub
+
     End If
 
-    ' Unknown object type => stringify leaf
+
+    ' fallback
     AddFlat flat, IIf(Len(prefix) = 0, "$", prefix), Json_Stringify(v)
+
 End Sub
 
 Private Sub AddFlat(ByVal flat As Collection, ByVal key As String, ByVal value As Variant)
@@ -1966,11 +1999,11 @@ Private Function Json_EscapePathSegment(ByVal s As String) As String
     Json_EscapePathSegment = s
 End Function
 
-Private Sub VarAssign(ByRef dest As Variant, ByVal SRC As Variant)
-    If IsObject(SRC) Then
-        Set dest = SRC
+Private Sub VarAssign(ByRef dest As Variant, ByVal src As Variant)
+    If IsObject(src) Then
+        Set dest = src
     Else
-        dest = SRC
+        dest = src
     End If
 End Sub
 
@@ -2784,7 +2817,7 @@ Private Function Excel_ListObjectHeadersTo1D(ByVal lo As ListObject) As Variant
 
     Dim i As Long
     For i = 1 To n
-        arr(i) = lo.ListColumns(i).Name
+        arr(i) = lo.ListColumns(i).name
     Next i
 
     Excel_ListObjectHeadersTo1D = arr
@@ -3058,6 +3091,20 @@ Public Function Json_TryResolvePath( _
     Json_TryResolvePath = True
 End Function
 
+Public Function Json_ObjGet(ByVal obj As Collection, ByVal key As String) As Variant
+    Const ERR_SRC As String = "zz_ModernJsonInVba.Json_ObjGet"
+    
+    Dim v As Variant
+    
+    If Json_TryObjGet(obj, key, v) Then
+        VarAssign Json_ObjGet, v
+        Exit Function
+    End If
+    
+    Err.Raise vbObjectError + 5320, ERR_SRC, _
+        "JSON object key not found: '" & key & "'"
+End Function
+
 Public Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, ByRef outValue As Variant) As Boolean
     Json_TryObjGet = False
     VarAssign outValue, Null
@@ -3182,11 +3229,11 @@ Public Function Excel_ListObjectToJson( _
     Optional ByVal parseArraysOnly As Boolean = False _
 ) As String
 
-    Const SRC As String = "Excel_ListObjectToJson"
+    Const src As String = "Excel_ListObjectToJson"
 
     ' Defensive sanity: if TAG_OBJECT was renamed/hidden, fail loudly.
     If Len(TAG_OBJECT) = 0 Then
-        Err.Raise vbObjectError + 1172, SRC, "TAG_OBJECT is blank or not initialized."
+        Err.Raise vbObjectError + 1172, src, "TAG_OBJECT is blank or not initialized."
     End If
 
     ' -----------------------------
@@ -3200,9 +3247,9 @@ Public Function Excel_ListObjectToJson( _
 
     Dim c As Long
     For c = 1 To colCount
-        headers(c) = Trim$(CStr(lo.ListColumns(c).Name))
+        headers(c) = Trim$(CStr(lo.ListColumns(c).name))
         If Len(headers(c)) = 0 Then
-            Err.Raise vbObjectError + 1120, SRC, "Header at index " & CStr(c) & " is blank."
+            Err.Raise vbObjectError + 1120, src, "Header at index " & CStr(c) & " is blank."
         End If
     Next c
 
@@ -3211,7 +3258,7 @@ Public Function Excel_ListObjectToJson( _
     For i = 1 To colCount
         For j = i + 1 To colCount
             If StrComp(headers(i), headers(j), vbTextCompare) = 0 Then
-                Err.Raise vbObjectError + 1121, SRC, _
+                Err.Raise vbObjectError + 1121, src, _
                     "Duplicate header (case-insensitive): '" & headers(i) & "' at indices " & CStr(i) & " and " & CStr(j) & "."
             End If
         Next j
@@ -3238,7 +3285,7 @@ Public Function Excel_ListObjectToJson( _
     dataCols = UBound(data, 2) - LBound(data, 2) + 1
 
     If dataCols <> colCount Then
-        Err.Raise vbObjectError + 1171, SRC, _
+        Err.Raise vbObjectError + 1171, src, _
             "ListObject DataBodyRange columns (" & CStr(dataCols) & ") do not match header count (" & CStr(colCount) & ")."
     End If
 
@@ -3262,14 +3309,14 @@ Public Function Excel_ListObjectToJson( _
 
             ' Reject array index paths (matches unflatten contract)
             If (InStr(1, keyPath, "[", vbBinaryCompare) > 0) Or (InStr(1, keyPath, "]", vbBinaryCompare) > 0) Then
-                Err.Raise vbObjectError + 905, SRC, "Unflatten does not support array index paths: " & keyPath
+                Err.Raise vbObjectError + 905, src, "Unflatten does not support array index paths: " & keyPath
             End If
 
             Dim v As Variant
             v = data(LBound(data, 1) + r - 1, LBound(data, 2) + c - 1)
 
             If IsError(v) Then
-                Err.Raise vbObjectError + 1170, SRC, _
+                Err.Raise vbObjectError + 1170, src, _
                     "Excel error value encountered at row " & CStr(r) & ", col " & CStr(c) & " (header '" & keyPath & "')."
             End If
 
@@ -3417,7 +3464,7 @@ Private Sub Excel_CaptureFormulaTemplates( _
                 ReDim Preserve outFmlR1C1(1 To UBound(outFmlR1C1) * 2) As String
             End If
 
-            outHdrs(outCount) = CStr(lo.ListColumns(c).Name)
+            outHdrs(outCount) = CStr(lo.ListColumns(c).name)
             outFmlR1C1(outCount) = f
         End If
     Next c
@@ -3518,3 +3565,1373 @@ Private Sub Excel_ApplyFormulasToAppendedRows( _
         End If
     Next c
 End Sub
+
+' =============================================================================
+' Excel_UpsertListObjectFromSource
+'
+' Purpose
+'   Unified ingestion entry point for loading structured text formats into an
+'   Excel ListObject using the deterministic ModernJsonInVBA upsert pipeline.
+'
+'   The function accepts structured source text (JSON, CSV, XML), converts it
+'   into the canonical JSON representation expected by the core engine, and
+'   then delegates the actual table ingestion to:
+'
+'       Excel_UpsertListObjectFromJsonAtRoot
+'
+'   This preserves all deterministic behaviors of the core engine including:
+'       - stable header discovery
+'       - schema evolution controls
+'       - formula column preservation
+'       - deterministic ListObject updates
+'
+'
+' Architecture
+'
+'       Source Text
+'           ¦
+'           ?
+'     Format Adapter
+'   (JSON / CSV / XML)
+'           ¦
+'           ?
+'        JSON Text
+'           ¦
+'           ?
+'   Excel_UpsertListObjectFromJsonAtRoot
+'           ¦
+'           ?
+'     Flatten + Table Extraction
+'           ¦
+'           ?
+'      2D Array Conversion
+'           ¦
+'           ?
+'   Deterministic ListObject Upsert
+'
+'
+' Supported Formats
+'
+'   ExcelSourceFormat_JSON
+'       Input is already JSON text. The caller supplies the tableRoot path.
+'
+'   ExcelSourceFormat_CSV
+'       CSV text is converted to a JSON array-of-objects via CsvTextToJson().
+'       The resulting table root is "$".
+'
+'   ExcelSourceFormat_XML
+'       XML text is converted to JSON via XmlTextToJson(). The resulting JSON
+'       structure is expected to contain an array under the property "item".
+'       The resulting table root is "$.item".
+'
+'
+' Parameters
+'
+'   ws
+'       Target worksheet containing the ListObject.
+'
+'   tableName
+'       Name of the ListObject to create or update.
+'
+'   topLeft
+'       Anchor cell used when creating the table if it does not exist.
+'
+'   sourceText
+'       Raw input text representing the structured data source.
+'
+'   format
+'       ExcelSourceFormat enum specifying the input format.
+'
+'   tableRoot
+'       JSON path identifying the array-of-objects that forms the table.
+'       Used only when format = ExcelSourceFormat_JSON.
+'
+'   clearExisting
+'       If True, existing rows are cleared before inserting new data.
+'
+'   addMissingColumns
+'       If True, new columns discovered in the input schema are added.
+'
+'   removeMissingColumns
+'       If True, columns not present in the input schema are removed.
+'
+'   preserveFormulaColumns
+'       If True, columns containing formulas are preserved during upsert.
+'
+'   fillFormulasOnAppend
+'       If True, formula columns automatically propagate when rows expand.
+'
+'   nonTableArraysAsJson
+'       If True, nested arrays not part of the table root are serialized as
+'       JSON text in their respective cells instead of being excluded.
+'
+'
+' Determinism Guarantees
+'
+'   - Header discovery preserves first-seen order.
+'   - Stable column ordering across runs.
+'   - Schema evolution controlled via explicit flags.
+'   - No Scripting.Dictionary dependencies.
+'   - Consistent ListObject structure regardless of source format.
+'
+'
+' Notes
+'
+'   This function acts strictly as a routing and format-adaptation layer.
+'   All parsing, flattening, schema discovery, and ListObject update logic
+'   remains centralized inside the ModernJsonInVBA ingestion pipeline.
+'
+' =============================================================================
+Public Sub Excel_UpsertListObjectFromSource( _
+    ByVal ws As Worksheet, _
+    ByVal tableName As String, _
+    ByVal topLeft As Range, _
+    ByVal sourceText As String, _
+    ByVal format As ExcelSourceFormat, _
+    Optional ByVal tableRoot As String = "$", _
+    Optional ByVal clearExisting As Boolean = True, _
+    Optional ByVal addMissingColumns As Boolean = True, _
+    Optional ByVal removeMissingColumns As Boolean = False, _
+    Optional ByVal preserveFormulaColumns As Boolean = True, _
+    Optional ByVal fillFormulasOnAppend As Boolean = True, _
+    Optional ByVal nonTableArraysAsJson As Boolean = False _
+)
+
+    Const ERR_SRC As String = "Excel_UpsertListObjectFromSource"
+    Const ERR_BADFORMAT As Long = vbObjectError + 1400
+
+    Dim jsonText As String
+    Dim resolvedRoot As String
+
+    Select Case format
+
+        Case ExcelSourceFormat_JSON
+            
+            jsonText = sourceText
+            resolvedRoot = tableRoot
+    
+        Case ExcelSourceFormat_CSV
+            
+            jsonText = CsvTextToJson(sourceText)
+            resolvedRoot = "$"
+    
+        Case ExcelSourceFormat_XML
+
+            jsonText = XmlTextToJson(sourceText)
+            resolvedRoot = tableRoot
+    
+        Case Else
+            
+            Err.Raise ERR_BADFORMAT, ERR_SRC, "Unsupported source format."
+    
+    End Select
+
+
+    Excel_UpsertListObjectFromJsonAtRoot _
+        ws, _
+        tableName, _
+        topLeft, _
+        jsonText, _
+        resolvedRoot, _
+        clearExisting, _
+        addMissingColumns, _
+        removeMissingColumns, _
+        preserveFormulaColumns, _
+        fillFormulasOnAppend, _
+        nonTableArraysAsJson
+
+End Sub
+
+' =============================================================================
+' CsvFileToJson
+'
+' Reads a CSV file and converts it to JSON by delegating to CsvTextToJson.
+' =============================================================================
+Public Function CsvFileToJson(ByVal filePath As String) As String
+
+    Dim f As Integer
+    f = FreeFile
+    
+    Dim txt As String
+    Open filePath For Input As #f
+    txt = Input$(LOF(f), f)
+    Close #f
+    
+    CsvFileToJson = CsvTextToJson(txt)
+
+End Function
+
+' =============================================================================
+' CsvTextToJson
+'
+' Converts raw CSV text into a JSON array-of-objects.
+'
+' This implements an RFC-4180 style state-machine CSV parser.
+' =============================================================================
+Public Function CsvTextToJson(ByVal txt As String) As String
+
+    Dim rows As New Collection
+    Dim fields As New Collection
+    
+    Dim field As String
+    Dim inQuotes As Boolean
+    
+    Dim i As Long
+    Dim ch As String
+    Dim nextCh As String
+    Dim L As Long
+    
+    L = Len(txt)
+
+    For i = 1 To L
+    
+        ch = Mid$(txt, i, 1)
+        
+        If inQuotes Then
+        
+            If ch = """" Then
+            
+                If i < L Then
+                    nextCh = Mid$(txt, i + 1, 1)
+                    
+                    If nextCh = """" Then
+                        field = field & """"
+                        i = i + 1
+                    Else
+                        inQuotes = False
+                    End If
+                    
+                Else
+                    inQuotes = False
+                End If
+                
+            Else
+                field = field & ch
+            End If
+            
+        Else
+        
+            Select Case ch
+            
+                Case """"
+                    inQuotes = True
+                    
+                Case ","
+                    fields.Add field
+                    field = ""
+                    
+                Case vbCr
+                    ' ignore
+                    
+                Case vbLf
+                    fields.Add field
+                    field = ""
+                    
+                    Dim row() As String
+                    ReDim row(0 To fields.count - 1)
+                    
+                    Dim j As Long
+                    For j = 1 To fields.count
+                        row(j - 1) = fields(j)
+                    Next j
+                    
+                    rows.Add row
+                    Set fields = New Collection
+                    
+                Case Else
+                    field = field & ch
+                    
+            End Select
+            
+        End If
+        
+    Next i
+
+    If field <> "" Or fields.count > 0 Then
+    
+        fields.Add field
+        
+        Dim row2() As String
+        ReDim row2(0 To fields.count - 1)
+        
+        Dim k As Long
+        For k = 1 To fields.count
+            row2(k - 1) = fields(k)
+        Next k
+        
+        rows.Add row2
+        
+    End If
+
+    If rows.count = 0 Then
+        CsvTextToJson = "[]"
+        Exit Function
+    End If
+
+    Dim headers() As String
+    headers = rows(1)
+
+    Dim r As Long, c As Long
+    Dim json As String
+    json = "["
+
+    For r = 2 To rows.count
+    
+        Dim cols() As String
+        cols = rows(r)
+        
+        json = json & "{"
+        
+        For c = LBound(headers) To UBound(headers)
+        
+            Dim key As String
+            key = headers(c)
+            
+            Dim val As String
+            If c <= UBound(cols) Then
+                val = cols(c)
+            Else
+                val = ""
+            End If
+            
+            key = Replace(key, "\", "\\")
+            key = Replace(key, """", "\""")
+            
+            val = Replace(val, "\", "\\")
+            val = Replace(val, """", "\""")
+            val = Replace(val, vbCrLf, "\n")
+            val = Replace(val, vbLf, "\n")
+            val = Replace(val, vbCr, "\n")
+            
+            json = json & """" & key & """:""" & val & """"
+            
+            If c < UBound(headers) Then json = json & ","
+            
+        Next c
+        
+        json = json & "},"
+        
+    Next r
+
+    If Right$(json, 1) = "," Then
+        json = Left$(json, Len(json) - 1)
+    End If
+    
+    json = json & "]"
+    
+    CsvTextToJson = json
+
+End Function
+
+
+' =============================================================================
+' Function:   XmlFileToJson
+'
+' Author:     William Smith
+' Created:    2026
+'
+' Summary
+'   Reads an XML file from disk and converts it into JSON by delegating
+'   parsing to XmlTextToJson.
+'
+' Behavior
+'   • Reads the entire XML file into memory.
+'   • Passes the raw text to XmlTextToJson for parsing and conversion.
+'
+' Parameters
+'   filePath (String)
+'       Full path to the XML file to read.
+'
+' Returns
+'   String
+'       JSON representation of the XML document.
+'
+' Notes
+'   This function is a thin I/O wrapper. All parsing logic resides in
+'   XmlTextToJson so that XML content can also be converted directly from
+'   raw text (for example from HTTP responses).
+' =============================================================================
+Public Function XmlFileToJson(ByVal filePath As String) As String
+
+    Dim f As Integer
+    f = FreeFile
+    
+    Dim txt As String
+    Open filePath For Input As #f
+    txt = Input$(LOF(f), f)
+    Close #f
+    
+    XmlFileToJson = XmlTextToJson(txt)
+
+End Function
+
+' =============================================================================
+' Function:   XmlTextToJson
+'
+' Author:     William Smith
+' Created:    2026
+'
+' Summary
+'   Converts raw XML text into a JSON representation using a lightweight
+'   pure-VBA XML parser.
+'
+' Behavior
+'   • Parses XML elements using a character-level recursive descent parser.
+'   • Produces JSON objects representing nested XML elements.
+'   • Text nodes are serialized as JSON string values.
+'
+' XML Support
+'   Supported:
+'       • Nested elements
+'       • Text nodes
+'       • Self-closing tags
+'
+'   Not supported:
+'       • XML namespaces
+'       • DTDs
+'       • Processing instructions
+'       • Comments
+'
+' Parameters
+'   txt (String)
+'       Raw XML document text.
+'
+' Returns
+'   String
+'       JSON representation of the XML structure.
+'
+' Example
+'
+'   XML
+'       <person>
+'           <id>1</id>
+'           <name>Alice</name>
+'       </person>
+'
+'   Result
+'       {"id":{"value":"1"},"name":{"value":"Alice"}}
+'
+' Notes
+'   Designed for portability across Excel environments without requiring
+'   platform-specific libraries such as MSXML.
+' =============================================================================
+Public Function XmlTextToJson(ByVal txt As String) As String
+
+    Dim pos As Long
+    pos = 1
+    
+    ' -------------------------------------------------
+    ' Strip UTF-8 / UTF-16 BOM if present
+    ' -------------------------------------------------
+    If Len(txt) > 0 Then
+        If AscW(Left$(txt, 1)) = &HFEFF Then
+            txt = Mid$(txt, 2)
+        End If
+    End If
+    
+    Xml_SkipWhitespace txt, pos
+    
+    ' Parse root XML node directly into JSON
+    XmlTextToJson = Xml_ParseNode(txt, pos)
+
+End Function
+
+Private Function Xml_ParseNode(ByVal txt As String, ByRef pos As Long) As String
+
+    Dim name As String
+    Dim L As Long
+    L = Len(txt)
+
+    pos = pos + 1
+    name = Xml_ReadName(txt, pos)
+
+    Xml_SkipAttributes txt, pos
+
+    If Mid$(txt, pos, 2) = "/>" Then
+        pos = pos + 2
+        Xml_ParseNode = "null"
+        Exit Function
+    End If
+
+    If Mid$(txt, pos, 1) = ">" Then
+        pos = pos + 1
+    Else
+        Err.Raise vbObjectError + 824, "XmlTextToJson", "Malformed XML: expected '>'."
+    End If
+
+
+    Dim childNames As New Collection
+    Dim childValues As New Collection
+    Dim textBuffer As String
+
+    Do While pos <= L
+
+        Dim startPos As Long
+        startPos = pos
+
+        Xml_SkipWhitespace txt, pos
+
+        If Mid$(txt, pos, 2) = "</" Then
+
+            pos = pos + 2
+            Xml_ReadName txt, pos
+
+            If Mid$(txt, pos, 1) = ">" Then pos = pos + 1
+            Exit Do
+
+        End If
+
+        If Mid$(txt, pos, 9) = "<![CDATA[" Then
+
+            Dim cEnd As Long
+            cEnd = InStr(pos + 9, txt, "]]>")
+
+            If cEnd = 0 Then
+                Err.Raise vbObjectError + 822, "XmlTextToJson", "Unterminated CDATA section."
+            End If
+
+            textBuffer = textBuffer & Mid$(txt, pos + 9, cEnd - (pos + 9))
+            pos = cEnd + 3
+
+            GoTo ContinueLoop
+
+        End If
+
+        If Mid$(txt, pos, 1) = "<" Then
+
+            Dim childName As String
+            Dim tmp As Long
+            tmp = pos + 1
+
+            childName = Xml_ReadName(txt, tmp)
+
+            Dim childJson As String
+            childJson = Xml_ParseNode(txt, pos)
+
+            childNames.Add childName
+            childValues.Add childJson
+
+        Else
+
+            Dim textVal As String
+            textVal = Xml_ReadText(txt, pos)
+
+            If Len(Trim$(textVal)) > 0 Then
+                textBuffer = textBuffer & textVal
+            End If
+
+        End If
+
+ContinueLoop:
+
+        If pos = startPos Then
+            Err.Raise vbObjectError + 821, "XmlTextToJson", "Malformed XML: parser stalled."
+        End If
+
+    Loop
+
+
+    ' -------------------------------------------------
+    ' TEXT ONLY NODE  ? primitive
+    ' -------------------------------------------------
+    If childNames.count = 0 Then
+
+        If Len(textBuffer) = 0 Then
+            Xml_ParseNode = "null"
+        Else
+            Xml_ParseNode = """" & Xml_EscapeJson(textBuffer) & """"
+        End If
+
+        Exit Function
+
+    End If
+
+
+    ' -------------------------------------------------
+    ' OBJECT NODE
+    ' -------------------------------------------------
+    Dim json As String
+    json = "{"
+
+    Dim first As Boolean
+    first = True
+
+    ' preserve text when mixed content exists
+    If Len(textBuffer) > 0 Then
+        json = json & """value"":""" & Xml_EscapeJson(textBuffer) & """"
+        first = False
+    End If
+
+
+    Dim used() As Boolean
+    ReDim used(1 To childNames.count)
+
+    Dim i As Long, j As Long
+
+    For i = 1 To childNames.count
+
+        If used(i) Then GoTo NextChild
+
+        Dim nm As String
+        nm = childNames(i)
+
+        Dim count As Long
+        count = 0
+
+        For j = 1 To childNames.count
+            If childNames(j) = nm Then count = count + 1
+        Next j
+
+        If Not first Then json = json & ","
+        first = False
+
+        json = json & """" & Xml_EscapeJson(nm) & """:"
+
+        If count = 1 Then
+
+            json = json & childValues(i)
+            used(i) = True
+
+        Else
+
+            json = json & "["
+            Dim firstArr As Boolean
+            firstArr = True
+
+            For j = 1 To childNames.count
+
+                If childNames(j) = nm Then
+
+                    If Not firstArr Then json = json & ","
+                    firstArr = False
+
+                    json = json & childValues(j)
+                    used(j) = True
+
+                End If
+
+            Next j
+
+            json = json & "]"
+
+        End If
+
+NextChild:
+
+    Next i
+
+    json = json & "}"
+
+    Xml_ParseNode = json
+
+End Function
+
+Private Function Xml_ReadName(ByVal txt As String, ByRef pos As Long) As String
+
+    Dim startPos As Long
+    startPos = pos
+    
+    Dim ch As String
+    
+    ' --- first character rules ---
+    If pos > Len(txt) Then
+        Err.Raise vbObjectError + 822, "XmlTextToJson", "Unexpected end while reading tag name."
+    End If
+    
+    ch = Mid$(txt, pos, 1)
+    
+    ' XML names cannot start with number, dash, or dot
+    If Not (ch Like "[A-Za-z_:]") Then
+        Err.Raise vbObjectError + 823, "XmlTextToJson", "Invalid start of XML name."
+    End If
+    
+    pos = pos + 1
+    
+    ' --- subsequent characters ---
+    Do While pos <= Len(txt)
+    
+        ch = Mid$(txt, pos, 1)
+        
+        If ch Like "[A-Za-z0-9_.:-]" Then
+            pos = pos + 1
+        Else
+            Exit Do
+        End If
+        
+    Loop
+    
+    Xml_ReadName = Mid$(txt, startPos, pos - startPos)
+
+End Function
+
+Private Function Xml_ReadText(ByVal txt As String, ByRef pos As Long) As String
+
+    Dim startPos As Long
+    startPos = pos
+
+    Do While pos <= Len(txt)
+
+        If Mid$(txt, pos, 1) = "<" Then Exit Do
+
+        pos = pos + 1
+
+    Loop
+
+    Dim raw As String
+    raw = Mid$(txt, startPos, pos - startPos)
+
+    Xml_ReadText = Xml_DecodeEntities(raw)
+
+End Function
+
+Private Sub Xml_SkipWhitespace(ByVal txt As String, ByRef pos As Long)
+
+    Do While pos <= Len(txt)
+    
+        Dim ch As String
+        ch = Mid$(txt, pos, 1)
+        
+        If ch = " " Or ch = vbCr Or ch = vbLf Or ch = vbTab Then
+            pos = pos + 1
+        Else
+            Exit Do
+        End If
+        
+    Loop
+
+End Sub
+
+Private Function Xml_EscapeJson(ByVal s As String) As String
+
+    Dim i As Long
+    Dim ch As String
+    Dim code As Long
+    Dim out As String
+
+    For i = 1 To Len(s)
+
+        ch = Mid$(s, i, 1)
+        code = AscW(ch)
+
+        Select Case code
+
+            Case 34 ' "
+                out = out & "\"""
+
+            Case 92 ' \
+                out = out & "\\"
+
+            Case 8
+                out = out & "\b"
+
+            Case 9
+                out = out & "\t"
+
+            Case 10
+                out = out & "\n"
+
+            Case 12
+                out = out & "\f"
+
+            Case 13
+                out = out & "\r"
+
+            Case 0 To 31
+                out = out & "\u" & Right$("000" & Hex$(code), 4)
+
+            Case Else
+                out = out & ch
+
+        End Select
+
+    Next i
+
+    Xml_EscapeJson = out
+
+End Function
+
+Private Function Xml_DecodeEntities(ByVal s As String) As String
+
+    ' -------------------------------------------------------------
+    ' Decodes XML built-in entities and numeric entities.
+    '
+    ' Supported:
+    '   &lt;   <
+    '   &gt;   >
+    '   &amp;  &
+    '   &apos; '
+    '   &quot; "
+    '   &#NNN;
+    '   &#xHH;
+    ' -------------------------------------------------------------
+
+    Dim i As Long
+    Dim out As String
+    Dim n As Long
+
+    n = Len(s)
+    i = 1
+
+    Do While i <= n
+
+        Dim ch As String
+        ch = Mid$(s, i, 1)
+
+        If ch <> "&" Then
+            out = out & ch
+            i = i + 1
+        Else
+
+            Dim semi As Long
+            semi = InStr(i, s, ";")
+
+            If semi = 0 Then
+                out = out & "&"
+                i = i + 1
+                GoTo ContinueLoop
+            End If
+
+            Dim ent As String
+            ent = Mid$(s, i + 1, semi - i - 1)
+
+            Select Case ent
+
+                Case "lt"
+                    out = out & "<"
+
+                Case "gt"
+                    out = out & ">"
+
+                Case "amp"
+                    out = out & "&"
+
+                Case "apos"
+                    out = out & "'"
+
+                Case "quot"
+                    out = out & """"
+
+                Case Else
+
+                    ' numeric entities
+                    If Left$(ent, 1) = "#" Then
+
+                        Dim code As Long
+
+                        If LCase$(Mid$(ent, 2, 1)) = "x" Then
+                            code = CLng("&H" & Mid$(ent, 3))
+                        Else
+                            code = CLng(Mid$(ent, 2))
+                        End If
+
+                        out = out & ChrW$(code)
+
+                    Else
+                        ' unknown entity: leave literal
+                        out = out & "&" & ent & ";"
+                    End If
+
+            End Select
+
+            i = semi + 1
+
+        End If
+
+ContinueLoop:
+    Loop
+
+    Xml_DecodeEntities = out
+
+End Function
+
+Private Sub Xml_SkipAttributes(ByVal txt As String, ByRef pos As Long)
+
+    Dim ch As String
+    Dim quote As String
+
+    Do While pos <= Len(txt)
+
+        ch = Mid$(txt, pos, 1)
+
+        Select Case ch
+
+            Case """", "'"
+                quote = ch
+                pos = pos + 1
+
+                Do While pos <= Len(txt) And Mid$(txt, pos, 1) <> quote
+                    pos = pos + 1
+                Loop
+
+            Case ">", "/"
+                Exit Sub
+
+        End Select
+
+        pos = pos + 1
+
+    Loop
+
+End Sub
+
+Private Function XmlJson_CollapseValueNodes(ByVal jsonText As String) As String
+
+    ' Converts patterns like:
+    '   "sku":{"value":"A100"}
+    ' into:
+    '   "sku":"A100"
+
+    Dim i As Long
+    Dim result As String
+    
+    result = jsonText
+    
+    result = Replace(result, "{""value"":", "")
+    
+    ' remove closing braces that belong to collapsed value nodes
+    result = Replace(result, "}}", "}")
+    
+    XmlJson_CollapseValueNodes = result
+
+End Function
+
+' =============================================================================
+' Json_CoalesceChildArrays
+'
+' Purpose:
+'   Extract nested child arrays from a parent JSON array and merge them into
+'   a single array. Supports optional injection of parent values, literals,
+'   and Excel formulas via a key map.
+'
+' Example:
+'   Parent JSON
+'       $.orders
+'           + items[]
+'
+'   Result:
+'       flattened array of items with optional injected fields
+'
+' Key Map Format:
+'   Collection of Array(source, destination)
+'
+'   source modes:
+'       "orderId"      -> copy parent field
+'       "'=ROW()"      -> inject Excel formula
+'       "'orders"      -> inject literal constant
+'
+' Parameters:
+'   parentJson      - Source JSON document
+'   parentRoot      - Path to parent array (ex: "$.orders")
+'   childProperty   - Name of child array property (ex: "items")
+'   strictMode      - If True, validates child object shape consistency
+'   parentKeyMap    - Optional mapping collection for injected fields
+'
+' Returns:
+'   JSON string representing merged child array
+'
+' Notes:
+'   - Deterministic traversal
+'   - No Excel dependencies
+'   - Literal injection uses leading `'`
+' =============================================================================
+Public Function Json_CoalesceChildArrays( _
+    ByVal parentJson As String, _
+    ByVal parentRoot As String, _
+    ByVal childProperty As String, _
+    Optional ByVal strictMode As Boolean = False, _
+    Optional ByVal parentKeyMap As Collection = Nothing _
+) As String
+
+    Const ERR_SRC As String = "Json_CoalesceChildArrays"
+
+    Dim parsed As Variant
+    Json_ParseInto parentJson, parsed
+
+    Dim parents As Collection
+    Set parents = Json_ResolveArrayPath(parsed, parentRoot)
+
+    Dim result As New Collection
+
+    Dim firstShape As Collection
+    Dim shapeCaptured As Boolean
+
+    Dim parentObj As Variant
+    Dim childArr As Variant
+    Dim childObj As Variant
+
+    Dim found As Boolean
+    Dim row As Collection
+    Dim i As Long
+    Dim pair As Variant
+
+    Dim parentVal As Variant
+    Dim keyPair As Variant
+    Dim src As String
+
+    For Each parentObj In parents
+
+        ' ------------------------------------------------
+        ' child array lookup
+        ' ------------------------------------------------
+        found = Json_TryObjGet(parentObj, childProperty, childArr)
+
+        If Not found Then GoTo NextParent
+        If IsNull(childArr) Then GoTo NextParent
+
+        If (Not IsObject(childArr)) Or (TypeName(childArr) <> "Collection") Then
+            Err.Raise vbObjectError + 5302, ERR_SRC, _
+                "Child property is not an array: '" & childProperty & "'"
+        End If
+
+        For Each childObj In childArr
+
+            ' ------------------------------------------------
+            ' strict validation
+            ' ------------------------------------------------
+            If strictMode Then
+
+                If childObj.count = 0 Or childObj(1) <> "__OBJ__" Then
+                    Err.Raise vbObjectError + 5303, ERR_SRC, _
+                        "Strict mode requires arrays of objects"
+                End If
+
+                If Not shapeCaptured Then
+                    Set firstShape = Json_ObjectShape(childObj)
+                    shapeCaptured = True
+                Else
+                    If Not Json_ObjectShapeMatches(childObj, firstShape) Then
+                        Err.Raise vbObjectError + 5304, ERR_SRC, _
+                            "Child array shapes are inconsistent"
+                    End If
+                End If
+
+            End If
+
+            ' ------------------------------------------------
+            ' clone child object
+            ' ------------------------------------------------
+            Set row = New Collection
+            row.Add "__OBJ__"
+
+            For i = 2 To childObj.count
+                pair = childObj(i)
+                row.Add pair
+            Next i
+
+            ' ------------------------------------------------
+            ' parent / literal injection
+            ' ------------------------------------------------
+            If Not parentKeyMap Is Nothing Then
+
+                For Each keyPair In parentKeyMap
+
+                    src = CStr(keyPair(0))
+
+                    ' literal injection
+                    If Left$(src, 1) = "'" Then
+
+                        Json_ObjSet row, keyPair(1), Mid$(src, 2)
+
+                    Else
+
+                        If Not Json_TryObjGet(parentObj, src, parentVal) Then
+                            Err.Raise vbObjectError + 5301, ERR_SRC, _
+                                "Parent key not found: '" & src & "'"
+                        End If
+
+                        Json_ObjSet row, keyPair(1), parentVal
+
+                    End If
+
+                Next keyPair
+
+            End If
+
+            result.Add row
+
+        Next childObj
+
+NextParent:
+
+    Next parentObj
+
+    Json_CoalesceChildArrays = Json_Stringify(result)
+
+End Function
+
+' =============================================================================
+' Json_CoalesceArraysFromStrings
+'
+' Purpose:
+'   Merge multiple JSON arrays (provided as strings) into a single array.
+'
+' Parameters:
+'   jsonStrings - Collection of JSON array strings
+'   strictMode  - If True, ensures all objects share identical shape
+'
+' Returns:
+'   JSON string containing the merged array
+'
+' Notes:
+'   - Each string must represent a JSON array
+'   - Deterministic ordering preserved
+'   - Fast-fails if strict shape validation fails
+' =============================================================================
+Public Function Json_CoalesceArraysFromStrings( _
+    ByVal jsonStrings As Collection, _
+    Optional ByVal strictMode As Boolean = False _
+) As String
+
+    Const ERR_SRC As String = "Json_CoalesceArraysFromStrings"
+    
+    Dim result As New Collection
+    
+    Dim firstShape As Collection
+    Dim shapeCaptured As Boolean
+    
+    Dim i As Long
+    
+    For i = 1 To jsonStrings.count
+    
+        Dim txt As String
+        txt = jsonStrings(i)
+        
+        Dim parsed As Variant
+        Json_ParseInto txt, parsed
+        
+        If Not TypeOf parsed Is Collection Then
+            Err.Raise vbObjectError + 5201, ERR_SRC, _
+                "Value is not a JSON array"
+        End If
+        
+        Dim arr As Collection
+        Set arr = parsed
+        
+        Dim obj As Variant
+        
+        For Each obj In arr
+        
+            If strictMode Then
+            
+                If Not TypeOf obj Is Collection Then
+                    Err.Raise vbObjectError + 5202, ERR_SRC, _
+                        "Strict mode requires arrays of objects"
+                End If
+                
+                If obj.count = 0 Or obj(1) <> "__OBJ__" Then
+                    Err.Raise vbObjectError + 5203, ERR_SRC, _
+                        "Strict mode requires arrays of objects"
+                End If
+                
+                If Not shapeCaptured Then
+                
+                    Set firstShape = Json_ObjectShape(obj)
+                    shapeCaptured = True
+                    
+                Else
+                
+                    If Not Json_ObjectShapeMatches(obj, firstShape) Then
+                        Err.Raise vbObjectError + 5204, ERR_SRC, _
+                            "Array object shapes are inconsistent"
+                    End If
+                    
+                End If
+                
+            End If
+            
+            result.Add obj
+            
+        Next obj
+        
+    Next i
+    
+    Json_CoalesceArraysFromStrings = Json_Stringify(result)
+
+End Function
+
+' =============================================================================
+' Json_CoalesceArraysFromRange
+'
+' Purpose:
+'   Merge JSON arrays stored in an Excel range into a single array.
+'
+' Parameters:
+'   rng        - Range containing JSON array strings
+'   strictMode - Optional strict object shape validation
+'
+' Returns:
+'   JSON string containing merged arrays
+'
+' Notes:
+'   - Empty cells are ignored
+'   - Uses Value2 bulk read for performance
+' =============================================================================
+Public Function Json_CoalesceArraysFromRange( _
+    ByVal rng As Range, _
+    Optional ByVal strictMode As Boolean = False _
+) As String
+
+    Dim jsonStrings As Collection
+    Set jsonStrings = Excel_RangeToJsonStrings(rng)
+    
+    Json_CoalesceArraysFromRange = _
+        Json_CoalesceArraysFromStrings(jsonStrings, strictMode)
+
+End Function
+
+' =============================================================================
+' Excel_RangeToJsonStrings
+'
+' Purpose:
+'   Convert a worksheet range into a collection of JSON strings.
+'
+' Parameters:
+'   rng - Range containing JSON text values
+'
+' Returns:
+'   Collection of non-empty trimmed strings
+'
+' Notes:
+'   - Uses bulk Value2 read for performance
+'   - Ignores empty cells
+'   - Handles single-cell ranges
+' =============================================================================
+Public Function Excel_RangeToJsonStrings( _
+    ByVal rng As Range _
+) As Collection
+
+    Dim result As New Collection
+    Dim data As Variant
+    Dim r As Long, c As Long
+    
+    data = rng.Value2
+    
+    If IsArray(data) Then
+    
+        For r = LBound(data, 1) To UBound(data, 1)
+            For c = LBound(data, 2) To UBound(data, 2)
+            
+                Dim txt As String
+                txt = Trim$(CStr(data(r, c)))
+                
+                If Len(txt) > 0 Then
+                    result.Add txt
+                End If
+                
+            Next c
+        Next r
+        
+    Else
+    
+        Dim singleVal As String
+        singleVal = Trim$(CStr(data))
+        
+        If Len(singleVal) > 0 Then
+            result.Add singleVal
+        End If
+        
+    End If
+    
+    Set Excel_RangeToJsonStrings = result
+
+End Function
+
+' =============================================================================
+' Json_ResolveArrayPath
+'
+' Purpose:
+'   Resolve a simple JSON path (ex: "$.products") to an array collection.
+'
+' Parameters:
+'   root - Parsed JSON root object
+'   path - Path expression starting with "$"
+'
+' Returns:
+'   Collection representing the resolved array
+'
+' Notes:
+'   - Supports simple dot traversal only
+'   - Does not implement full JSONPath
+' =============================================================================
+Public Function Json_ResolveArrayPath( _
+    ByVal root As Variant, _
+    ByVal path As String _
+) As Collection
+
+    Const ERR_SRC As String = "Json_ResolveArrayPath"
+
+    If Len(path) = 0 Then
+        Err.Raise vbObjectError + 5310, ERR_SRC, "Path cannot be empty"
+    End If
+
+    If path = "$" Then
+        If TypeOf root Is Collection Then
+            Set Json_ResolveArrayPath = root
+            Exit Function
+        End If
+        
+        Err.Raise vbObjectError + 5311, ERR_SRC, _
+            "Root is not an array"
+    End If
+
+    If Left$(path, 2) <> "$." Then
+        Err.Raise vbObjectError + 5312, ERR_SRC, _
+            "Path must begin with '$.'"
+    End If
+
+    Dim parts() As String
+    parts = Split(Mid$(path, 3), ".")
+
+    Dim current As Object
+    Set current = root
+    
+    Dim i As Integer
+    For i = LBound(parts) To UBound(parts)
+    
+        If Not TypeOf current Is Collection Then
+            Err.Raise vbObjectError + 5313, ERR_SRC, _
+                "Path traversal encountered non-object"
+        End If
+    
+        Set current = Json_ObjGet(current, parts(i))
+    
+    Next i
+
+    If Not TypeOf current Is Collection Then
+        Err.Raise vbObjectError + 5315, ERR_SRC, _
+            "Resolved path is not an array"
+    End If
+
+    Set Json_ResolveArrayPath = current
+
+End Function
+
+Private Function Json_ObjectShape(ByVal obj As Collection) As Collection
+
+    Dim shape As New Collection
+    Dim i As Long
+    
+    For i = 2 To obj.count
+        shape.Add obj(i)(0)
+    Next i
+    
+    Set Json_ObjectShape = shape
+
+End Function
+
+Private Function Json_ObjectShapeMatches( _
+    ByVal obj As Collection, _
+    ByVal shape As Collection _
+) As Boolean
+
+    Dim i As Long
+    
+    If obj.count - 1 <> shape.count Then Exit Function
+    
+    For i = 1 To shape.count
+        If obj(i + 1)(0) <> shape(i) Then Exit Function
+    Next i
+    
+    Json_ObjectShapeMatches = True
+
+End Function
