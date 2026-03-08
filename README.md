@@ -26,7 +26,6 @@ Pure VBA. No dependencies. No silent schema drift.
   - [Strict Schema Mode](#strict-schema-mode)
   - [API Example With Nested Objects](#api-example-with-nested-objects)
 - [Accessing Json Elements (Directly in VBA)](#accessing-json-elements-directly-in-vba)
-- [Excel_UpsertListObjectFromJsonAtRoot](#excel_upsertlistobjectfromjsonatroot)
 - [Excel to JSON (Reverse Materialization)](#excel-to-json-reverse-materialization)
 - [Understanding tableRoot](#understanding-tableroot)
 - [HTTP Helper (Windows)](#http-helper-windows)
@@ -244,146 +243,57 @@ Excel_UpsertListObjectFromJsonAtRoot _
 Also see: [API Product Intelligence Demo Case Study](https://github.com/WilliamSmithEdward/APIProductIntelligenceDemo)
 
 ``` vba
-Public Sub Example_Api_Refresh()
 
-    '--------------------------------------------------------------------------
-    ' Example_Api_Refresh
-    '
-    ' Demonstrates a full JSON ? Excel relational materialization pipeline.
-    '
-    ' Steps:
-    '   1. Fetch JSON from remote API
-    '   2. Materialize primary table (products) into tProducts
-    '   3. Iterate rows to extract nested "reviews" arrays
-    '   4. Inject foreign key (parentId) into each review object
-    '   5. Materialize child table (tReviews)
-    '
-    ' Notes:
-    '   - Uses deterministic JSON parser + Excel upsert engine
-    '   - Avoids schema drift and maintains stable column ordering
-    '--------------------------------------------------------------------------
+Public Sub Example_Api_Refresh()
 
     On Error GoTo CleanFail
 
-    ' Improve performance during bulk operations
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
-    ' Target worksheet
-    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Quick Start")
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Quick Start")
 
-    '--------------------------------------------------------------------------
-    ' Step 1: Retrieve JSON payload from API
-    '--------------------------------------------------------------------------
+    ' Fetch API
     Dim jsonText As String
     jsonText = HttpGetText("https://dummyjson.com/products")
 
-    '--------------------------------------------------------------------------
-    ' Step 2: Materialize primary table (products)
-    '
-    ' Root: $.products
-    ' Destination: ListObject "tProducts"
-    '--------------------------------------------------------------------------
+    ' Products table
     Excel_UpsertListObjectFromJsonAtRoot _
         ws, "tProducts", ws.Range("A1"), _
         jsonText, "$.products", _
         True, True, False, True, True, True
 
-    ' Reference the newly populated table
-    Dim lo As ListObject: Set lo = ws.ListObjects("tProducts")
+    ' ---------------------------------------------
+    ' Build key map for parent injections
+    ' ---------------------------------------------
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "productId")
 
-    '--------------------------------------------------------------------------
-    ' Step 3: Prepare reviews table (child table)
-    '
-    ' If it already exists, clear the body before repopulating
-    '--------------------------------------------------------------------------
-    Dim loReviews As ListObject
+    ' Extract + merge reviews with parent key injected
+    Dim reviewsJson As String
+    reviewsJson = Json_CoalesceChildArrays( _
+        jsonText, _
+        "$.products", _
+        "reviews", _
+        True, _
+        keyMap)
 
-    On Error Resume Next
-    Set loReviews = ws.ListObjects("tReviews")
-    On Error GoTo 0
-
-    If Not loReviews Is Nothing Then
-        If Not loReviews.DataBodyRange Is Nothing Then
-            loReviews.DataBodyRange.Delete
-        End If
-    End If
-
-    '--------------------------------------------------------------------------
-    ' Step 4: Iterate parent rows to extract nested review arrays
-    '--------------------------------------------------------------------------
-    Dim rw As ListRow
-    Dim reviewsColl As Collection
-    Dim reviewObj As Object
-
-    For Each rw In lo.ListRows
-
-        ' Parent product ID (used as foreign key)
-        Dim parentId As Variant
-        parentId = rw.Range.Columns(lo.ListColumns("id").Index).value
-
-        ' Nested reviews JSON stored as string
-        Dim reviewsJson As String
-        reviewsJson = rw.Range.Columns(lo.ListColumns("reviews").Index).value
-
-        ' Skip empty values
-        If Len(reviewsJson) > 0 Then
-
-            ' Parse JSON array into collection
-            Set reviewsColl = Nothing
-            Json_ParseInto reviewsJson, reviewsColl
-
-            ' Ensure parsed array contains elements
-            If Not reviewsColl Is Nothing Then
-                If reviewsColl.count > 0 Then
-
-                    '----------------------------------------------------------
-                    ' Inject parentId into each review object (relational foreign key)
-                    ' Inject ISO date conversion formula
-                    '----------------------------------------------------------
-                    For Each reviewObj In reviewsColl
-                        Json_ObjSet reviewObj, "parentId", parentId
-                        Json_ObjSet reviewObj, "date (Pacific)", _
-                            "=LET(utc,--SUBSTITUTE(LEFT([@date],19),""T"","" "")," & _
-                            "y,YEAR(utc)," & _
-                            "dstStartUTC,DATE(y,3,14)-WEEKDAY(DATE(y,3,14)-1)+10/24," & _
-                            "dstEndUTC,DATE(y,11,7)-WEEKDAY(DATE(y,11,7)-1)+9/24," & _
-                            "utc+IF((utc>=dstStartUTC)*(utc<dstEndUTC),-7/24,-8/24))"
-                    Next
-
-                    ' Convert enriched collection back to JSON
-                    reviewsJson = Json_Stringify(reviewsColl)
-
-                    '----------------------------------------------------------
-                    ' Step 5: Materialize child table (reviews)
-                    '
-                    ' Root: $
-                    ' Destination: ListObject "tReviews"
-                    '----------------------------------------------------------
-                    Excel_UpsertListObjectFromJsonAtRoot _
-                        ws, "tReviews", ws.Range("A35"), _
-                        reviewsJson, "$", _
-                        False, True, False, True, True, True
-
-                End If
-            End If
-
-        End If
-
-    Next
+    ' Reviews table
+    Excel_UpsertListObjectFromJsonAtRoot _
+        ws, "tReviews", ws.Range("A35"), _
+        reviewsJson, "$", _
+        True, True, False, True, True, True
 
 CleanExit:
 
-    ' Restore Excel environment
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     Application.Calculation = xlCalculationAutomatic
     Exit Sub
 
 CleanFail:
-
-    ' Ensure environment is restored even if an error occurs
     Resume CleanExit
 
 End Sub
@@ -625,51 +535,6 @@ Public Sub Example_ReadValuesFromJson()
     
 End Sub
 ```
-
-------------------------------------------------------------------------
-
-## Excel_UpsertListObjectFromJsonAtRoot
-
-### Overview
-
-`Excel_UpsertListObjectFromJsonAtRoot` parses JSON, extracts a specific **array-of-objects** using a JSON path (`tableRoot`), converts the objects into rows, and **upserts** the result into an Excel table (`ListObject`).
-
-The function handles nested objects automatically, preserves schema deterministically, and optionally stores nested arrays as JSON text in cells.
-
----
-
-### Parameters
-
-| Parameter | Description |
-|---|---|
-`ws` | Worksheet where the table exists or will be created |
-`tableName` | Name of the Excel table (`ListObject`) |
-`topLeft` | Cell where the table should be created if it does not already exist |
-`jsonText` | The JSON text to parse |
-`tableRoot` | JSON path that resolves to the **array-of-objects** that should become table rows |
-
----
-
-### Behavior Flags
-
-| Flag | Description |
-|---|---|
-`clearExisting` | If `True`, existing rows are cleared before writing new data (refresh mode). If `False`, rows are appended. |
-`addMissingColumns` | If `True`, new columns discovered in the JSON will be added to the table. |
-`removeMissingColumns` | If `True`, columns not present in the JSON will be removed from the table. |
-`preserveFormulaColumns` | If `True`, existing formula columns are preserved during updates. |
-`fillFormulasOnAppend` | If `True`, formulas automatically fill newly appended rows. |
-`nonTableArraysAsJson` | If `True`, nested arrays that are not part of `tableRoot` are stored in cells as JSON text. If `False`, those arrays are excluded from the table extraction. |
-
----
-
-### Notes
-
-- `tableRoot` must resolve to an **array of JSON objects** (or `null`).
-- Nested objects are flattened into dot-notation columns (`customer.id`, `customer.name`, etc.).
-- Nested arrays not part of the selected table root can optionally be preserved as JSON text inside cells.
-
-For more advanced usage (including nested table extraction and round-trip workflows), see the **complex nesting example in the provided `.xlsm` workbook**.
 
 ------------------------------------------------------------------------
 
