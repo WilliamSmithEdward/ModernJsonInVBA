@@ -106,6 +106,25 @@ Public Sub Json_RunAllTests()
     Test_ExtractTableRows_TableRootMustBeArrayOfObjects
     Test_ExtractTableRows_TableRootMustExist
     Test_ExtractTableRows_RootArray_PrimitiveRowsRejected
+    
+    ' Coalesce child arrays
+    Test_CoalesceChildArrays_Basic
+    Test_CoalesceChildArrays_InjectsParentKey
+    Test_CoalesceChildArrays_DeterministicOrder
+    Test_CoalesceChildArrays_EmptyChildrenIgnored
+    Test_CoalesceChildArrays_IgnoresMissingChildProperty
+    Test_CoalesceChildArrays_StrictModeDetectsShapeMismatch
+    Test_CoalesceChildArrays_StrictModeRejectsNonObjects
+    Test_CoalesceChildArrays_ChildPropertyNotArray
+    Test_CoalesceChildArrays_ParentRootNotArray
+    Test_CoalesceChildArrays_NullChildArrayIgnored
+    Test_CoalesceChildArrays_StrictModeRejectsNullChild
+    Test_CoalesceChildArrays_EmptyParentArray
+    Test_CoalesceChildArrays_ParentIdOverwrite
+    Test_CoalesceChildArrays_KeyMapMissingParentKey
+    Test_CoalesceChildArrays_MultipleParentKeys
+    Test_CoalesceChildArrays_KeyMapWithEmptyChildArray
+    Test_CoalesceChildArrays_KeyMapOverwrite
 
     MsgBox "All JSON Parser tests passed.", vbInformation
 End Sub
@@ -1621,4 +1640,299 @@ Private Sub Test_ExtractTableRows_RootArray_PrimitiveRowsRejected()
 expected:
     AssertTrue Err.Number <> 0, "ExtractTableRows should error on root array-of-primitives"
     Err.Clear
+End Sub
+
+Private Sub Test_CoalesceChildArrays_Basic()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[{""sku"":""A""}]},{""id"":2,""items"":[{""sku"":""B""}]}]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 2, arr.count, "coalesce child count"
+    AssertEquals "A", Obj_GetValue(arr(1), "sku"), "first child"
+    AssertEquals "B", Obj_GetValue(arr(2), "sku"), "second child"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_InjectsParentKey()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":10,""items"":[{""sku"":""X""}]},{""id"":20,""items"":[{""sku"":""Y""}]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "parentId")
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 10, Obj_GetValue(arr(1), "parentId"), "parentId injected row1"
+    AssertEquals 20, Obj_GetValue(arr(2), "parentId"), "parentId injected row2"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_DeterministicOrder()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[{""sku"":""A0""},{""sku"":""A1""}]},{""id"":2,""items"":[{""sku"":""B0""}]}]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals "A0", Obj_GetValue(arr(1), "sku"), "order row1"
+    AssertEquals "A1", Obj_GetValue(arr(2), "sku"), "order row2"
+    AssertEquals "B0", Obj_GetValue(arr(3), "sku"), "order row3"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_EmptyChildrenIgnored()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[]},{""id"":2,""items"":[{""sku"":""B""}]}]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 1, arr.count, "empty child arrays ignored"
+    AssertEquals "B", Obj_GetValue(arr(1), "sku"), "remaining child"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_StrictModeDetectsShapeMismatch()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[{""sku"":""A""}]},{""id"":2,""items"":[{""sku"":""B"",""qty"":2}]}]}"
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items", True)
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected strict mode shape error"
+
+expected:
+    AssertTrue Err.Number <> 0, "strict mode should detect mismatched child shape"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_IgnoresMissingChildProperty()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1},{""id"":2,""items"":[{""sku"":""B""}]}]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 1, arr.count, "missing child property ignored"
+    AssertEquals "B", Obj_GetValue(arr(1), "sku"), "remaining child"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_ChildPropertyNotArray()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":{""sku"":""A""}}]}"
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected non-array child error"
+
+expected:
+    AssertTrue Err.Number <> 0, "child property must be array"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_StrictModeRejectsNonObjects()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[""A"",""B""]}]}"
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items", True)
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected strict mode object error"
+
+expected:
+    AssertTrue Err.Number <> 0, "strict mode must reject non-object child entries"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_ParentRootNotArray()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":{""id"":1}}"
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected parent root not array"
+
+expected:
+    AssertTrue Err.Number <> 0, "parent root must be array"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_ParentIdOverwrite()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":5,""items"":[{""sku"":""A"",""parentId"":999}]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "parentId")
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 5, Obj_GetValue(arr(1), "parentId"), "parentId overwritten"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_NullChildArrayIgnored()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":null},{""id"":2,""items"":[{""sku"":""B""}]}]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 1, arr.count, "null child arrays ignored"
+    AssertEquals "B", Obj_GetValue(arr(1), "sku"), "remaining child"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_StrictModeRejectsNullChild()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[null,{""sku"":""A""}]}]}"
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items", True)
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected strict mode null child error"
+
+expected:
+    AssertTrue Err.Number <> 0, "strict mode must reject null child entries"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_EmptyParentArray()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[]}"
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items")
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 0, arr.count, "empty parent array produces empty result"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_KeyMapMissingParentKey()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""items"":[{""sku"":""A""}]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "orderId")
+
+    On Error GoTo expected
+
+    Call Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Err.Raise vbObjectError + 699, "mJsonTests", "Expected missing parent key error"
+
+expected:
+    AssertTrue Err.Number <> 0, "missing parent key in keyMap should fail"
+    Err.Clear
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_MultipleParentKeys()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""customer"":""Ada"",""items"":[{""sku"":""A""}]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "orderId")
+    keyMap.Add Array("customer", "customer")
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 1, Obj_GetValue(arr(1), "orderId"), "orderId injected"
+    AssertEquals "Ada", Obj_GetValue(arr(1), "customer"), "customer injected"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_KeyMapWithEmptyChildArray()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":1,""items"":[]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "orderId")
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 0, arr.count, "empty child arrays produce no rows"
+
+End Sub
+
+Private Sub Test_CoalesceChildArrays_KeyMapOverwrite()
+
+    Dim jsonText As String
+    jsonText = "{""orders"":[{""id"":7,""items"":[{""sku"":""A"",""orderId"":999}]}]}"
+
+    Dim keyMap As New Collection
+    keyMap.Add Array("id", "orderId")
+
+    Dim outJson As String
+    outJson = Json_CoalesceChildArrays(jsonText, "$.orders", "items", False, keyMap)
+
+    Dim arr As Collection
+    Set arr = Json_Parse(outJson)
+
+    AssertEquals 7, Obj_GetValue(arr(1), "orderId"), "parent key overwrites child"
+
 End Sub
