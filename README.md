@@ -4,9 +4,11 @@
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Deterministic JSON (and CSV / XML) → Excel Tables → JSON**  
+**Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
-Pure VBA. No dependencies. No silent schema drift.
+Pure VBA. No dependencies. No silent schema drift.  
+\
+Take nested or complex API payloads and  convert them into normalized Excel tables with parent keys preserved. Supports Excel formula and scalar value injection.
 
 ------------------------------------------------------------------------
 
@@ -168,7 +170,7 @@ Module name:
 
 ### Option 2 — Use the Provided Workbook
 
-1.  Download `ModernVBAJson_1.0.0.xlsm`
+1.  Download `ModernJsonInVBA.xlsm`
 2.  Open the file
 3.  Enable macros
 
