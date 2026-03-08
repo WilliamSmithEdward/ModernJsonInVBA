@@ -168,7 +168,7 @@ Module name:
 
 ### Option 2 — Use the Provided Workbook
 
-1.  Download `ModernVBAJson_1.0.0.xlsm`
+1.  Download `ModernJsonInVBA.xlsm`
 2.  Open the file
 3.  Enable macros
 
