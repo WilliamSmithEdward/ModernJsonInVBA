@@ -1112,7 +1112,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
     Optional ByVal nonTableArraysAsJson As Boolean = False _
 )
-    Const src As String = "Excel_UpsertListObjectFromJsonAtRoot"
+    Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
     On Error GoTo Fail
 
@@ -1120,20 +1120,20 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Json_ParseInto jsonText, parsed
 
     If (Not IsObject(parsed)) Or (TypeName(parsed) <> "Collection") Then
-        Err.Raise vbObjectError + 1130, src, _
+        Err.Raise vbObjectError + 1130, SRC, _
             "JSON root must be an object or array (Collection). Primitive root is not supported for table upsert."
     End If
 
     Dim resolved As Variant
     If Not Json_TryResolvePath(parsed, tableRoot, resolved) Then
-        Err.Raise vbObjectError + 1160, src, "tableRoot not found: " & tableRoot
+        Err.Raise vbObjectError + 1160, SRC, "tableRoot not found: " & tableRoot
     End If
 
     If Not IsNull(resolved) Then
         If (Not IsObject(resolved)) _
             Or (TypeName(resolved) <> "Collection") _
             Or Json_IsObject(resolved) Then
-            Err.Raise vbObjectError + 1162, src, _
+            Err.Raise vbObjectError + 1162, SRC, _
                 "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
         End If
 
@@ -1148,7 +1148,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
             If (Not IsObject(elem)) _
                 Or (TypeName(elem) <> "Collection") _
                 Or (Not Json_IsObject(elem)) Then
-                Err.Raise vbObjectError + 1163, src, _
+                Err.Raise vbObjectError + 1163, SRC, _
                     "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
             End If
         Next i
@@ -1204,11 +1204,11 @@ Fail:
     Dim s As String: s = Err.Source
 
     Err.Clear
-    If Len(s) > 0 And StrComp(s, src, vbBinaryCompare) <> 0 Then
+    If Len(s) > 0 And StrComp(s, SRC, vbBinaryCompare) <> 0 Then
         d = d & " | inner_source=" & s
     End If
 
-    Err.Raise n, src, d
+    Err.Raise n, SRC, d
 End Sub
 
 ' =============================================================================
@@ -1999,11 +1999,11 @@ Private Function Json_EscapePathSegment(ByVal s As String) As String
     Json_EscapePathSegment = s
 End Function
 
-Private Sub VarAssign(ByRef dest As Variant, ByVal src As Variant)
-    If IsObject(src) Then
-        Set dest = src
+Private Sub VarAssign(ByRef dest As Variant, ByVal SRC As Variant)
+    If IsObject(SRC) Then
+        Set dest = SRC
     Else
-        dest = src
+        dest = SRC
     End If
 End Sub
 
@@ -3146,143 +3146,116 @@ End Function
 ' =============================================================================
 ' Converts an Excel ListObject (table) into a JSON array-of-objects.
 '
-' Each row of the table becomes a JSON object. Column headers define the JSON
-' property paths, and values are taken from DataBodyRange.Value2. Nested object
-' paths using dotted notation (e.g. "customer.name") are supported.
+' Each row becomes a JSON object. Column headers define JSON property paths.
 '
-' Array index paths (e.g. "items[0].sku") are intentionally NOT supported
-' because Json_Unflatten does not reconstruct arrays from indexed paths.
+' Value precedence:
+'
+'   1. JSON structure parsed from cell text (if parseJsonInCells=True)
+'   2. Formula text (if preserveFormulas=True and JSON parsing did not occur)
+'   3. Raw Value2 cell value
+'
+' Nested paths using dot notation (customer.name) are supported.
+' Array index paths (items[0].sku) are NOT supported.
 '
 ' -----------------------------------------------------------------------------
 ' PARAMETERS
 ' -----------------------------------------------------------------------------
 ' lo
-'   The source ListObject (Excel table). Column headers are used as JSON keys.
+'   Source ListObject
 '
-' includeBlanksAsNull (Optional, default False)
-'   Controls how blank cells are handled.
+' includeBlanksAsNull (default False)
+'   Blank cells omitted or written as JSON null
 '
-'   False  -> Blank cells are omitted from the JSON object (key not present).
-'   True   -> Blank cells are written as JSON null.
+' parseJsonInCells (default False)
+'   Detect and parse JSON arrays/objects inside cell text
 '
-' parseJsonInCells (Optional, default False)
-'   If True, cell text that appears to contain JSON is parsed and embedded as
-'   a JSON object or array rather than serialized as a string.
+' parseArraysOnly (default False)
+'   Only parse arrays if True
 '
-'   Only parsed values that produce JSON arrays or objects are embedded.
-'   Primitive results (number/string/true/false/null) are left as literal cell
-'   values to avoid surprising coercion.
-'
-' parseArraysOnly (Optional, default False)
-'   Applies only when parseJsonInCells = True.
-'
-'   True   -> Only JSON arrays ("[ ... ]") are parsed from cells.
-'   False  -> Both arrays ("[ ... ]") and objects ("{ ... }") are parsed.
-'
-' -----------------------------------------------------------------------------
-' RETURNS
-' -----------------------------------------------------------------------------
-' String
-'   A JSON array of objects representing the rows of the ListObject.
-'
-'   Example output:
-'
-'   [
-'     {"id":1,"name":"A"},
-'     {"id":2,"name":"B"}
-'   ]
-'
-' -----------------------------------------------------------------------------
-' BEHAVIOR
-' -----------------------------------------------------------------------------
-' • Header order is deterministic and preserved in the output JSON.
-' • Header names must be non-blank and unique (case-insensitive).
-' • Nested object paths using dot notation are supported.
-' • Blank handling is controlled by includeBlanksAsNull.
-' • Excel error values (e.g. #N/A, #VALUE!) raise an error.
-' • JSON-looking cell text may optionally be parsed into arrays/objects.
+' preserveFormulas (default False)
+'   Serialize formula text instead of evaluated value
 '
 ' -----------------------------------------------------------------------------
 ' ERROR CONDITIONS
 ' -----------------------------------------------------------------------------
-' 1120  Blank header encountered.
-' 1121  Duplicate header (case-insensitive).
-' 1170  Excel error value found in a cell.
-' 1171  DataBodyRange column count mismatch.
-' 1172  TAG_OBJECT not initialized.
-' 905   Header contains array index path ("[ ]"), which is unsupported.
-'
-' -----------------------------------------------------------------------------
-' DESIGN NOTES
-' -----------------------------------------------------------------------------
-' • Uses Value2 to avoid Excel type coercion during read.
-' • JSON objects are represented internally as tagged Collections where
-'   index(1) = TAG_OBJECT.
-' • The function intentionally does not define policy for Excel-specific
-'   values such as Dates, formulas, or numeric precision. These are passed
-'   through as returned by Excel and may be normalized by callers if needed.
+' 1120 blank header
+' 1121 duplicate header
+' 1170 Excel error value
+' 1171 column mismatch
+' 1172 TAG_OBJECT missing
+' 905  array index path unsupported
 ' =============================================================================
 Public Function Excel_ListObjectToJson( _
     ByVal lo As ListObject, _
     Optional ByVal includeBlanksAsNull As Boolean = False, _
     Optional ByVal parseJsonInCells As Boolean = False, _
-    Optional ByVal parseArraysOnly As Boolean = False _
+    Optional ByVal parseArraysOnly As Boolean = False, _
+    Optional ByVal preserveFormulas As Boolean = False _
 ) As String
 
-    Const src As String = "Excel_ListObjectToJson"
+    Const SRC As String = "Excel_ListObjectToJson"
 
-    ' Defensive sanity: if TAG_OBJECT was renamed/hidden, fail loudly.
     If Len(TAG_OBJECT) = 0 Then
-        Err.Raise vbObjectError + 1172, src, "TAG_OBJECT is blank or not initialized."
+        Err.Raise vbObjectError + 1172, SRC, "TAG_OBJECT is blank or not initialized."
     End If
 
     ' -----------------------------
-    ' Headers (deterministic order)
+    ' Headers
     ' -----------------------------
     Dim colCount As Long
     colCount = lo.ListColumns.count
 
     Dim headers() As String
-    If colCount > 0 Then ReDim headers(1 To colCount) As String
+    If colCount > 0 Then ReDim headers(1 To colCount)
 
     Dim c As Long
     For c = 1 To colCount
         headers(c) = Trim$(CStr(lo.ListColumns(c).name))
         If Len(headers(c)) = 0 Then
-            Err.Raise vbObjectError + 1120, src, "Header at index " & CStr(c) & " is blank."
+            Err.Raise vbObjectError + 1120, SRC, _
+                "Header at index " & CStr(c) & " is blank."
         End If
     Next c
 
-    ' Local duplicate check (case-insensitive, matches contract)
     Dim i As Long, j As Long
     For i = 1 To colCount
         For j = i + 1 To colCount
             If StrComp(headers(i), headers(j), vbTextCompare) = 0 Then
-                Err.Raise vbObjectError + 1121, src, _
-                    "Duplicate header (case-insensitive): '" & headers(i) & "' at indices " & CStr(i) & " and " & CStr(j) & "."
+                Err.Raise vbObjectError + 1121, SRC, _
+                    "Duplicate header: '" & headers(i) & _
+                    "' at indices " & i & " and " & j
             End If
         Next j
     Next i
 
-    ' -----------------------------
-    ' No rows => []
-    ' -----------------------------
     If lo.DataBodyRange Is Nothing Then
         Excel_ListObjectToJson = "[]"
         Exit Function
     End If
 
     ' -----------------------------
-    ' Read values (Value2)
+    ' Bulk read
     ' -----------------------------
     Dim data As Variant
     data = lo.DataBodyRange.Value2
-    
-    ' Excel returns scalar for 1x1 range
+
+    Dim formulas As Variant
+    If preserveFormulas Then
+        formulas = lo.DataBodyRange.Formula
+    End If
+
     If Not IsArray(data) Then
         Dim tmp(1 To 1, 1 To 1) As Variant
         tmp(1, 1) = data
         data = tmp
+    End If
+
+    If preserveFormulas Then
+        If Not IsArray(formulas) Then
+            Dim tmpf(1 To 1, 1 To 1) As Variant
+            tmpf(1, 1) = formulas
+            formulas = tmpf
+        End If
     End If
 
     Dim rowCount As Long
@@ -3292,98 +3265,143 @@ Public Function Excel_ListObjectToJson( _
     dataCols = UBound(data, 2) - LBound(data, 2) + 1
 
     If dataCols <> colCount Then
-        Err.Raise vbObjectError + 1171, src, _
-            "ListObject DataBodyRange columns (" & CStr(dataCols) & ") do not match header count (" & CStr(colCount) & ")."
+        Err.Raise vbObjectError + 1171, SRC, _
+            "DataBodyRange columns (" & dataCols & _
+            ") do not match header count (" & colCount & ")."
     End If
 
     ' -----------------------------
-    ' Build array-of-objects
+    ' Build JSON
     ' -----------------------------
     Dim arr As Collection
-    Set arr = New Collection   ' JSON array (untagged)
+    Set arr = New Collection
 
     Dim r As Long
     For r = 1 To rowCount
 
         Dim rowObj As Collection
         Set rowObj = New Collection
-        rowObj.Add TAG_OBJECT   ' MUST be index 1
+        rowObj.Add TAG_OBJECT
 
         For c = 1 To colCount
 
             Dim keyPath As String
             keyPath = headers(c)
 
-            ' Reject array index paths (matches unflatten contract)
-            If (InStr(1, keyPath, "[", vbBinaryCompare) > 0) Or (InStr(1, keyPath, "]", vbBinaryCompare) > 0) Then
-                Err.Raise vbObjectError + 905, src, "Unflatten does not support array index paths: " & keyPath
+            If InStr(keyPath, "[") > 0 Or InStr(keyPath, "]") > 0 Then
+                Err.Raise vbObjectError + 905, SRC, _
+                    "Array index paths unsupported: " & keyPath
             End If
 
             Dim v As Variant
             v = data(LBound(data, 1) + r - 1, LBound(data, 2) + c - 1)
 
             If IsError(v) Then
-                Err.Raise vbObjectError + 1170, src, _
-                    "Excel error value encountered at row " & CStr(r) & ", col " & CStr(c) & " (header '" & keyPath & "')."
+                Err.Raise vbObjectError + 1170, SRC, _
+                    "Excel error value at row " & r & ", col " & c
             End If
 
-            Dim isBlank As Boolean
-            isBlank = IsEmpty(v) Or (VarType(v) = vbString And LenB(v) = 0)
+            Dim parsedJson As Boolean
+            parsedJson = False
 
-            If isBlank Then
-                If includeBlanksAsNull Then
-                    Excel_ListObjectToJson_InsertValue rowObj, keyPath, Null
-                Else
-                    ' Skip key entirely (absent)
-                End If
-            Else
+            ' ---------------------------------
+            ' JSON parsing (highest priority)
+            ' ---------------------------------
+            If parseJsonInCells Then
 
-                Dim vv As Variant
-                vv = v
+                If VarType(v) = vbString Then
 
-                ' Optional: parse JSON text in cells into real array/object nodes.
-                If parseJsonInCells Then
-                    If VarType(vv) = vbString Then
-                        Dim s As String
-                        s = Trim$(CStr(vv))
+                    Dim s As String
+                    s = Trim$(CStr(v))
 
-                        If Len(s) > 0 Then
-                            Dim firstCh As String
-                            firstCh = Left$(s, 1)
+                    If Len(s) > 0 Then
 
-                            Dim looksJson As Boolean
-                            If parseArraysOnly Then
-                                looksJson = (firstCh = "[")
-                            Else
-                                looksJson = (firstCh = "[" Or firstCh = "{")
-                            End If
+                        Dim firstCh As String
+                        firstCh = Left$(s, 1)
 
-                            If looksJson Then
-                                Dim parsedCell As Variant
-                                If Excel_ListObjectToJson_TryParseJsonCell(s, parsedCell) Then
-                                    ' Only embed object/array; primitives remain as literal cell value.
-                                    If IsObject(parsedCell) Then
-                                        If TypeName(parsedCell) = "Collection" Then
-                                            If Json_IsObject(parsedCell) Or Json_IsArray(parsedCell) Then
-                                                VarAssign vv, parsedCell
-                                            End If
+                        Dim looksJson As Boolean
+
+                        If parseArraysOnly Then
+                            looksJson = (firstCh = "[")
+                        Else
+                            looksJson = (firstCh = "[" Or firstCh = "{")
+                        End If
+
+                        If looksJson Then
+
+                            Dim parsedCell As Variant
+
+                            If Excel_ListObjectToJson_TryParseJsonCell(s, parsedCell) Then
+
+                                If IsObject(parsedCell) Then
+
+                                    If TypeName(parsedCell) = "Collection" Then
+
+                                        If Json_IsObject(parsedCell) Or Json_IsArray(parsedCell) Then
+                                            VarAssign v, parsedCell
+                                            parsedJson = True
                                         End If
+
                                     End If
+
                                 End If
+
                             End If
+
+                        End If
+
+                    End If
+
+                End If
+
+            End If
+
+            ' ---------------------------------
+            ' Formula preservation (secondary)
+            ' ---------------------------------
+            If preserveFormulas And Not parsedJson Then
+
+                Dim f As Variant
+                f = formulas(LBound(formulas, 1) + r - 1, LBound(formulas, 2) + c - 1)
+
+                If VarType(f) = vbString Then
+                    If Len(f) > 0 Then
+                        If Left$(f, 1) = "=" Then
+                            v = f
                         End If
                     End If
                 End If
 
-                Excel_ListObjectToJson_InsertValue rowObj, keyPath, vv
+            End If
+
+            Dim isBlank As Boolean
+            
+            If VarType(v) = vbString Then
+                isBlank = (LenB(v) = 0)
+            Else
+                isBlank = IsEmpty(v)
+            End If
+
+            If isBlank Then
+
+                If includeBlanksAsNull Then
+                    Excel_ListObjectToJson_InsertValue rowObj, keyPath, Null
+                End If
+
+            Else
+
+                Excel_ListObjectToJson_InsertValue rowObj, keyPath, v
+
             End If
 
         Next c
 
         arr.Add rowObj
+
     Next r
 
     Excel_ListObjectToJson = Json_Stringify(arr)
+
 End Function
 
 Private Sub Excel_ListObjectToJson_InsertValue( _
@@ -4573,7 +4591,7 @@ Public Function Json_CoalesceChildArrays( _
 
     Dim parentVal As Variant
     Dim keyPair As Variant
-    Dim src As String
+    Dim SRC As String
 
     For Each parentObj In parents
 
@@ -4632,18 +4650,18 @@ Public Function Json_CoalesceChildArrays( _
 
                 For Each keyPair In parentKeyMap
 
-                    src = CStr(keyPair(0))
+                    SRC = CStr(keyPair(0))
 
                     ' literal injection
-                    If Left$(src, 1) = "'" Then
+                    If Left$(SRC, 1) = "'" Then
 
-                        Json_ObjSet row, keyPair(1), Mid$(src, 2)
+                        Json_ObjSet row, keyPair(1), Mid$(SRC, 2)
 
                     Else
 
-                        If Not Json_TryObjGet(parentObj, src, parentVal) Then
+                        If Not Json_TryObjGet(parentObj, SRC, parentVal) Then
                             Err.Raise vbObjectError + 5301, ERR_SRC, _
-                                "Parent key not found: '" & src & "'"
+                                "Parent key not found: '" & SRC & "'"
                         End If
 
                         Json_ObjSet row, keyPair(1), parentVal
