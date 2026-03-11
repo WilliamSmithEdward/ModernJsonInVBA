@@ -29,6 +29,7 @@ Option Explicit
 
 Private Const TAG_OBJECT As String = "__OBJ__"
 Private Const ERR_SRC As String = "zz_ModernJsonInVBA"
+Private Const EXCEL_CHUNK_MAX_CELLS As Long = 50000
 
 ' =============================================================================
 ' Types
@@ -857,26 +858,31 @@ Private Sub Excel_ListObjectUpsertData( _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True _
 )
+    Const ERR_SRC As String = "Excel_ListObjectUpsertData"
+    Const ERR_SHEET_BOUNDS As Long = vbObjectError + 1102
+
     If removeMissingColumns And (Not clearExisting) Then
-        Err.Raise vbObjectError + 1101, "Excel_ListObjectUpsertData", _
+        Err.Raise vbObjectError + 1101, ERR_SRC, _
             "removeMissingColumns=True requires clearExisting=True (schema shrink would corrupt existing rows)."
     End If
 
     Dim calcOld As XlCalculation
     Dim eventsOld As Boolean
     Dim updatingOld As Boolean
+    Dim statusBarOld As Variant
 
     calcOld = Application.Calculation
     eventsOld = Application.EnableEvents
     updatingOld = Application.ScreenUpdating
+    statusBarOld = Application.StatusBar
 
     On Error GoTo CleanFail
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
+    Application.StatusBar = False
 
-    ' Capture formula templates before any changes
     Dim fHdrs() As String
     Dim fFmls() As String
     Dim fCount As Long
@@ -886,46 +892,108 @@ Private Sub Excel_ListObjectUpsertData( _
         fCount = 0
     End If
 
-    Dim existingHeaders As Variant
-    existingHeaders = Excel_ListObjectHeadersTo1D(lo)
-
     Dim oldCols As Long
     oldCols = lo.ListColumns.count
 
     Dim oldBodyRows As Long
+    Dim oldBody As Range
     If lo.DataBodyRange Is Nothing Then
         oldBodyRows = 0
     Else
-        oldBodyRows = lo.DataBodyRange.rows.count
+        Set oldBody = lo.DataBodyRange
+        oldBodyRows = oldBody.rows.count
     End If
+
+    Dim existingHeaders As Variant
+    existingHeaders = Excel_ListObjectHeadersTo1D(lo)
 
     Dim finalHeaders As Variant
     Dim finalData As Variant
+
+    Dim incomingCount As Long
+    incomingCount = UBound(headers) - LBound(headers) + 1
+
+    Dim existingCount As Long
+    existingCount = UBound(existingHeaders) - LBound(existingHeaders) + 1
+
+    Dim sameSchema As Boolean
+    sameSchema = False
+
+    If incomingCount = existingCount Then
+        sameSchema = True
+
+        Dim hs As Long
+        For hs = 1 To existingCount
+            If StrComp( _
+                Trim$(CStr(headers(LBound(headers) + hs - 1))), _
+                Trim$(CStr(existingHeaders(LBound(existingHeaders) + hs - 1))), _
+                vbTextCompare _
+            ) <> 0 Then
+                sameSchema = False
+                Exit For
+            End If
+        Next hs
+    End If
 
     If removeMissingColumns Then
         finalHeaders = headers
         finalData = data2D
     ElseIf addMissingColumns Then
-        finalHeaders = Excel_UnionHeadersFromListObject(lo, headers)
-        finalData = Excel_ReshapeDataToHeaders(headers, finalHeaders, data2D)
+        If sameSchema Then
+            finalHeaders = existingHeaders
+            finalData = data2D
+        Else
+            finalHeaders = Excel_UnionHeadersFromListObject(lo, headers)
+
+            Dim finalCount1 As Long
+            finalCount1 = UBound(finalHeaders) - LBound(finalHeaders) + 1
+
+            If finalCount1 = incomingCount Then
+                Dim unionMatchesIncoming As Boolean
+                unionMatchesIncoming = True
+
+                Dim hu As Long
+                For hu = 1 To incomingCount
+                    If StrComp( _
+                        Trim$(CStr(headers(LBound(headers) + hu - 1))), _
+                        Trim$(CStr(finalHeaders(LBound(finalHeaders) + hu - 1))), _
+                        vbTextCompare _
+                    ) <> 0 Then
+                        unionMatchesIncoming = False
+                        Exit For
+                    End If
+                Next hu
+
+                If unionMatchesIncoming Then
+                    finalData = data2D
+                Else
+                    finalData = Excel_ReshapeDataToHeaders(headers, finalHeaders, data2D)
+                End If
+            Else
+                finalData = Excel_ReshapeDataToHeaders(headers, finalHeaders, data2D)
+            End If
+        End If
     Else
         finalHeaders = existingHeaders
-        finalData = Excel_ReshapeDataToHeaders(headers, finalHeaders, data2D)
+
+        If sameSchema Then
+            finalData = data2D
+        Else
+            finalData = Excel_ReshapeDataToHeaders(headers, finalHeaders, data2D)
+        End If
     End If
 
-    Excel_ValidateHeaders finalHeaders, "Excel_ListObjectUpsertData"
+    Excel_ValidateHeaders finalHeaders, ERR_SRC
 
     Dim newBodyRows As Long
     newBodyRows = Excel_RowCount2D(finalData)
 
-    ' Empty rowset behavior under removeMissingColumns
     If removeMissingColumns Then
         If newBodyRows = 0 Then
             If Excel_IsDefaultValueOnlyHeaders(headers) Then
                 finalHeaders = existingHeaders
                 finalData = Empty
                 newBodyRows = 0
-
                 removeMissingColumns = False
                 addMissingColumns = False
                 clearExisting = True
@@ -940,41 +1008,148 @@ Private Sub Excel_ListObjectUpsertData( _
     Dim newCols As Long
     newCols = UBound(finalHeaders) - LBound(finalHeaders) + 1
 
+    Dim targetBodyRows As Long
+    If clearExisting Then
+        targetBodyRows = newBodyRows
+    Else
+        targetBodyRows = oldBodyRows + newBodyRows
+    End If
+
+    Dim headerRow As Long
+    headerRow = lo.HeaderRowRange.row
+
+    If newCols > lo.parent.Columns.count Then
+        Err.Raise ERR_SHEET_BOUNDS, ERR_SRC, _
+            "Target column count exceeds worksheet limit. cols=" & newCols & ", max=" & lo.parent.Columns.count
+    End If
+
+    If headerRow + targetBodyRows > lo.parent.rows.count Then
+        Err.Raise ERR_SHEET_BOUNDS, ERR_SRC, _
+            "Target row count exceeds worksheet limit. required_last_row=" & (headerRow + targetBodyRows) & _
+            ", max=" & lo.parent.rows.count
+    End If
+
     If newCols < oldCols Then
         Excel_ClearOrphanedColumns lo, newCols, oldCols, oldBodyRows
     End If
 
+    Dim writeHeaders As Boolean
+    writeHeaders = clearExisting Or (newCols <> oldCols)
+
+    Dim header2D As Variant
+    If writeHeaders Then
+        header2D = Excel_HeadersTo2D(finalHeaders)
+    End If
+
+    Dim rowsPerChunk As Long
+    rowsPerChunk = Excel_GetRowsPerChunk(newCols)
+
     If clearExisting Then
-        If oldBodyRows > 0 Then lo.DataBodyRange.ClearContents
+        If oldBodyRows > 0 Then oldBody.ClearContents
 
         Excel_ResizeTableToRowCol lo, finalHeaders, newBodyRows
-        lo.HeaderRowRange.Value2 = Excel_HeadersTo2D(finalHeaders)
 
-        If newBodyRows > 0 Then
-            lo.DataBodyRange.Value2 = finalData
+        If writeHeaders Then
+            lo.HeaderRowRange.Value2 = header2D
         End If
 
-        ' Re-apply formulas down full body after refresh
+        If newBodyRows > 0 Then
+            Dim fullBody As Range
+            Set fullBody = lo.DataBodyRange
+
+            If newBodyRows <= rowsPerChunk Then
+                fullBody.Value2 = finalData
+            Else
+                Dim srcRowLb As Long
+                Dim srcColLb As Long
+                srcRowLb = LBound(finalData, 1)
+                srcColLb = LBound(finalData, 2)
+
+                Dim writeStart As Long
+                writeStart = 1
+
+                Do While writeStart <= newBodyRows
+                    Dim takeRows As Long
+                    takeRows = rowsPerChunk
+                    If writeStart + takeRows - 1 > newBodyRows Then
+                        takeRows = newBodyRows - writeStart + 1
+                    End If
+
+                    Dim chunkData As Variant
+                    ReDim chunkData(1 To takeRows, 1 To newCols)
+
+                    Dim rr As Long
+                    Dim cc As Long
+                    For rr = 1 To takeRows
+                        For cc = 1 To newCols
+                            chunkData(rr, cc) = finalData(srcRowLb + writeStart + rr - 2, srcColLb + cc - 1)
+                        Next cc
+                    Next rr
+
+                    fullBody.Cells(writeStart, 1).Resize(takeRows, newCols).Value2 = chunkData
+                    Erase chunkData
+                    writeStart = writeStart + takeRows
+                Loop
+            End If
+        End If
+
+        If IsArray(finalData) Then Erase finalData
+
         If preserveFormulaColumns And fCount > 0 Then
             Excel_ApplyFormulasToBody lo, finalHeaders, newBodyRows, fHdrs, fFmls, fCount
         End If
-
     Else
         Dim startRow As Long
-        startRow = oldBodyRows  ' 0-based offset into DataBodyRange
+        startRow = oldBodyRows
 
-        If newCols <> oldCols Then
-            Excel_ResizeTableToRowCol lo, finalHeaders, oldBodyRows
-            lo.HeaderRowRange.Value2 = Excel_HeadersTo2D(finalHeaders)
+        Excel_ResizeTableToRowCol lo, finalHeaders, targetBodyRows
+
+        If writeHeaders Then
+            lo.HeaderRowRange.Value2 = header2D
         End If
-
-        Excel_ResizeTableToRowCol lo, finalHeaders, (oldBodyRows + newBodyRows)
 
         If newBodyRows > 0 Then
-            lo.DataBodyRange.Cells(startRow + 1, 1).Resize(newBodyRows, newCols).Value2 = finalData
+            Dim appendBody As Range
+            Set appendBody = lo.DataBodyRange
+
+            If newBodyRows <= rowsPerChunk Then
+                appendBody.Cells(startRow + 1, 1).Resize(newBodyRows, newCols).Value2 = finalData
+            Else
+                Dim srcRowLb2 As Long
+                Dim srcColLb2 As Long
+                srcRowLb2 = LBound(finalData, 1)
+                srcColLb2 = LBound(finalData, 2)
+
+                Dim appendStart As Long
+                appendStart = 1
+
+                Do While appendStart <= newBodyRows
+                    Dim takeRows2 As Long
+                    takeRows2 = rowsPerChunk
+                    If appendStart + takeRows2 - 1 > newBodyRows Then
+                        takeRows2 = newBodyRows - appendStart + 1
+                    End If
+
+                    Dim chunkData2 As Variant
+                    ReDim chunkData2(1 To takeRows2, 1 To newCols)
+
+                    Dim rr2 As Long
+                    Dim cc2 As Long
+                    For rr2 = 1 To takeRows2
+                        For cc2 = 1 To newCols
+                            chunkData2(rr2, cc2) = finalData(srcRowLb2 + appendStart + rr2 - 2, srcColLb2 + cc2 - 1)
+                        Next cc2
+                    Next rr2
+
+                    appendBody.Cells(startRow + appendStart, 1).Resize(takeRows2, newCols).Value2 = chunkData2
+                    Erase chunkData2
+                    appendStart = appendStart + takeRows2
+                Loop
+            End If
         End If
 
-        ' Fill formulas only into appended segment
+        If IsArray(finalData) Then Erase finalData
+
         If preserveFormulaColumns And fillFormulasOnAppend And fCount > 0 Then
             Excel_ApplyFormulasToAppendedRows lo, finalHeaders, startRow, newBodyRows, fHdrs, fFmls, fCount
         End If
@@ -985,12 +1160,14 @@ Private Sub Excel_ListObjectUpsertData( _
     End If
 
 CleanExit:
+    Application.StatusBar = statusBarOld
     Application.Calculation = calcOld
     Application.EnableEvents = eventsOld
     Application.ScreenUpdating = updatingOld
     Exit Sub
 
 CleanFail:
+    Application.StatusBar = statusBarOld
     Application.Calculation = calcOld
     Application.EnableEvents = eventsOld
     Application.ScreenUpdating = updatingOld
@@ -1021,15 +1198,22 @@ Public Sub Excel_UpsertListObjectOnSheet( _
         preserveFormulaColumns, fillFormulasOnAppend
 End Sub
 
-' Resize table to:
-'   - 1 header row
-'   - bodyRowCount rows
-'   - colCount based on finalHeaders
+' =============================================================================
+' Excel_ResizeTableToRowCol
 '
-' If bodyRowCount=0, a temporary row is used during resize then deleted.
+' Purpose:
+'   Resize a ListObject to the requested header/body shape while preserving
+'   existing compensation for Excel table materialization edge cases.
+'
+' Behavior:
+'   - Uses a single Resize call for the target shape.
+'   - Preserves explicit DataBodyRange materialization fallback when Excel does
+'     not fully realize body rows after Resize.
+'   - For bodyRowCount=0, uses a temporary body row during resize, then deletes it.
 '
 ' Errors:
 '   vbObjectError + 1140 listobject has no HeaderRowRange
+' =============================================================================
 Public Sub Excel_ResizeTableToRowCol( _
     ByVal lo As ListObject, _
     ByVal finalHeaders As Variant, _
@@ -1047,33 +1231,36 @@ Public Sub Excel_ResizeTableToRowCol( _
     Dim colCount As Long
     colCount = UBound(finalHeaders) - LBound(finalHeaders) + 1
 
-    Dim targetBodyRows As Long
-    targetBodyRows = bodyRowCount
-    If targetBodyRows = 0 Then targetBodyRows = 1
-
-    Dim totalRows As Long
-    totalRows = 1 + targetBodyRows
+    Dim resizeBodyRows As Long
+    resizeBodyRows = bodyRowCount
+    If resizeBodyRows < 1 Then resizeBodyRows = 1
 
     Dim newRange As Range
-    Set newRange = headerTopLeft.Resize(totalRows, colCount)
+    Set newRange = headerTopLeft.Resize(1 + resizeBodyRows, colCount)
 
     lo.Resize newRange
 
-    ' Force ListRows/DataBodyRange materialization
-    If bodyRowCount > 0 Then
-        Dim haveRows As Long
-        haveRows = lo.ListRows.count
-
-        Dim need As Long
-        need = bodyRowCount - haveRows
-
-        Dim i As Long
-        For i = 1 To need
-            lo.ListRows.Add
-        Next i
-    Else
+    If bodyRowCount <= 0 Then
         If Not lo.DataBodyRange Is Nothing Then lo.DataBodyRange.Delete
         lo.HeaderRowRange.Value2 = Excel_HeadersTo2D(finalHeaders)
+        Exit Sub
+    End If
+
+    Dim haveRows As Long
+    If lo.DataBodyRange Is Nothing Then
+        haveRows = 0
+    Else
+        haveRows = lo.DataBodyRange.rows.count
+    End If
+
+    If haveRows < bodyRowCount Then
+        Dim needRows As Long
+        needRows = bodyRowCount - haveRows
+
+        Dim i As Long
+        For i = 1 To needRows
+            lo.ListRows.Add
+        Next i
     End If
 End Sub
 
@@ -1136,72 +1323,172 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
             Err.Raise vbObjectError + 1162, SRC, _
                 "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
         End If
-
-        Dim arr As Collection
-        Set arr = resolved
-
-        Dim i As Long
-        For i = 1 To arr.count
-            Dim elem As Variant
-            VarAssign elem, arr(i)
-
-            If (Not IsObject(elem)) _
-                Or (TypeName(elem) <> "Collection") _
-                Or (Not Json_IsObject(elem)) Then
-                Err.Raise vbObjectError + 1163, SRC, _
-                    "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
-            End If
-        Next i
     End If
 
-    ' table-aware flatten:
-    '   nonTableArraysAsJson=False => exclude non-table arrays
-    '   nonTableArraysAsJson=True  => stringify non-table arrays
-    Dim arrayMode As Long
-    If nonTableArraysAsJson Then
-        arrayMode = 2
+    Dim arr As Collection
+    If IsNull(resolved) Then
+        Set arr = New Collection
     Else
-        arrayMode = 1
+        Set arr = resolved
     End If
 
-    Dim flat As Collection
-    Set flat = Json_Flatten(parsed, 12, tableRoot, arrayMode)
+    Dim rowCount As Long
+    rowCount = arr.count
 
-    Dim rows As Collection
-    Set rows = Json_ExtractTableRows(flat, tableRoot)
+    Dim i As Long
+    For i = 1 To rowCount
+        Dim elem As Variant
+        VarAssign elem, arr(i)
+
+        If (Not IsObject(elem)) _
+            Or (TypeName(elem) <> "Collection") _
+            Or (Not Json_IsObject(elem)) Then
+            Err.Raise vbObjectError + 1163, SRC, _
+                "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
+        End If
+    Next i
+
+    Dim hdrs() As String
+    Dim hdrCount As Long
+    Dim cap As Long
+    Dim slotHash() As Long
+    Dim slotIdx() As Long
+
+    cap = 64
+    ReDim slotHash(0 To cap - 1) As Long
+    ReDim slotIdx(0 To cap - 1) As Long
+    hdrCount = 0
+
+    For i = 1 To rowCount
+        Dim rowObj As Collection
+        Set rowObj = arr(i)
+        Json_RowObjectCollectHeaders rowObj, vbNullString, nonTableArraysAsJson, hdrs, hdrCount, slotHash, slotIdx, cap
+    Next i
 
     Dim headersOut As Variant
-    Dim data2D As Variant
-    data2D = Json_TableTo2D(rows, headersOut)
+    If hdrCount = 0 Then
+        ReDim headersOut(1 To 1) As Variant
+        headersOut(1) = "value"
+    Else
+        ReDim headersOut(1 To hdrCount) As Variant
 
-    ' Preserve schema when shrinking with zero rows (existing behavior)
-    If removeMissingColumns Then
-        If rows.count = 0 Then
-            Dim loExisting As ListObject
-            Set loExisting = Excel_GetListObject(ws, tableName)
+        Dim hc As Long
+        For hc = 1 To hdrCount
+            headersOut(hc) = hdrs(hc)
+        Next hc
+    End If
 
-            If Not loExisting Is Nothing Then
-                headersOut = Excel_ListObjectHeadersTo1D(loExisting)
-                data2D = Empty
+    If removeMissingColumns And rowCount = 0 Then
+        Dim loExisting As ListObject
+        Set loExisting = Excel_GetListObject(ws, tableName)
 
-                removeMissingColumns = False
-                addMissingColumns = False
-                clearExisting = True
-            End If
+        If Not loExisting Is Nothing Then
+            headersOut = Excel_ListObjectHeadersTo1D(loExisting)
+            addMissingColumns = False
+            removeMissingColumns = False
+            clearExisting = True
         End If
     End If
 
-    Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
-        headersOut, data2D, _
-        clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend
+    If rowCount = 0 Then
+        Dim emptyData As Variant
+        emptyData = Empty
 
+        Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+            headersOut, emptyData, _
+            clearExisting, addMissingColumns, removeMissingColumns, _
+            preserveFormulaColumns, fillFormulasOnAppend
+
+        Exit Sub
+    End If
+
+    Dim colCount As Long
+    colCount = UBound(headersOut) - LBound(headersOut) + 1
+
+    Dim rowsPerChunk As Long
+    rowsPerChunk = Excel_GetRowsPerChunk(colCount)
+
+    Dim chunkData As Variant
+    Dim chunkRows As Long
+    Dim chunkRowPos As Long
+    Dim rowIndex As Long
+    Dim firstWrite As Boolean
+
+    firstWrite = True
+    chunkRows = rowCount
+    If chunkRows > rowsPerChunk Then chunkRows = rowsPerChunk
+    ReDim chunkData(1 To chunkRows, 1 To colCount)
+
+    chunkRowPos = 0
+
+    For rowIndex = 1 To rowCount
+        If chunkRowPos = chunkRows Then
+            Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+                headersOut, chunkData, _
+                IIf(firstWrite, clearExisting, False), _
+                IIf(firstWrite, addMissingColumns, False), _
+                IIf(firstWrite, removeMissingColumns, False), _
+                preserveFormulaColumns, fillFormulasOnAppend
+
+            firstWrite = False
+            Erase chunkData
+
+            Dim remainingRows As Long
+            remainingRows = rowCount - rowIndex + 1
+            chunkRows = remainingRows
+            If chunkRows > rowsPerChunk Then chunkRows = rowsPerChunk
+            ReDim chunkData(1 To chunkRows, 1 To colCount)
+
+            chunkRowPos = 0
+        End If
+
+        chunkRowPos = chunkRowPos + 1
+        Set rowObj = arr(rowIndex)
+        Json_RowObjectFillRow rowObj, vbNullString, nonTableArraysAsJson, hdrs, slotHash, slotIdx, cap, chunkData, chunkRowPos
+    Next rowIndex
+
+    If chunkRowPos > 0 Then
+        If chunkRowPos < chunkRows Then
+            Dim lastChunk As Variant
+            ReDim lastChunk(1 To chunkRowPos, 1 To colCount)
+
+            Dim rr As Long
+            Dim cc As Long
+            For rr = 1 To chunkRowPos
+                For cc = 1 To colCount
+                    lastChunk(rr, cc) = chunkData(rr, cc)
+                Next cc
+            Next rr
+
+            Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+                headersOut, lastChunk, _
+                IIf(firstWrite, clearExisting, False), _
+                IIf(firstWrite, addMissingColumns, False), _
+                IIf(firstWrite, removeMissingColumns, False), _
+                preserveFormulaColumns, fillFormulasOnAppend
+
+            Erase lastChunk
+        Else
+            Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+                headersOut, chunkData, _
+                IIf(firstWrite, clearExisting, False), _
+                IIf(firstWrite, addMissingColumns, False), _
+                IIf(firstWrite, removeMissingColumns, False), _
+                preserveFormulaColumns, fillFormulasOnAppend
+        End If
+    End If
+
+    Erase chunkData
     Exit Sub
 
 Fail:
-    Dim n As Long: n = Err.Number
-    Dim d As String: d = Err.Description
-    Dim s As String: s = Err.Source
+    Dim n As Long
+    Dim d As String
+    Dim s As String
+
+    n = Err.Number
+    d = Err.Description
+    s = Err.Source
 
     Err.Clear
     If Len(s) > 0 And StrComp(s, SRC, vbBinaryCompare) <> 0 Then
@@ -2895,18 +3182,82 @@ Private Function Excel_ReshapeDataToHeaders( _
     Dim outArr As Variant
     ReDim outArr(1 To inRows, 1 To outCols)
 
+    Dim cap As Long
+    cap = 1
+    Do While cap < (inCols * 2)
+        cap = cap * 2
+    Loop
+    If cap < 16 Then cap = 16
+
+    Dim slotHash() As Long
+    Dim slotIdx() As Long
+    ReDim slotHash(0 To cap - 1) As Long
+    ReDim slotIdx(0 To cap - 1) As Long
+
+    Dim i As Long
+    For i = LBound(inHeaders) To UBound(inHeaders)
+        Dim key As String
+        key = Trim$(CStr(inHeaders(i)))
+
+        Dim h As Long
+        h = Json_Hash32_FNV1a(key)
+
+        Dim pos As Long
+        Dim mask As Long
+        mask = cap - 1
+        pos = (h And mask)
+
+        Do
+            If slotIdx(pos) = 0 Then
+                slotHash(pos) = h
+                slotIdx(pos) = (i - LBound(inHeaders) + 1)
+                Exit Do
+            End If
+
+            If slotHash(pos) = h Then
+                If StrComp(Trim$(CStr(inHeaders(LBound(inHeaders) + slotIdx(pos) - 1))), key, vbTextCompare) = 0 Then
+                    Exit Do
+                End If
+            End If
+
+            pos = (pos + 1) And mask
+        Loop
+    Next i
+
     Dim oc As Long
     For oc = 1 To outCols
-        Dim h As String
-        h = CStr(outHeaders(LBound(outHeaders) + oc - 1))
+        Dim outKey As String
+        outKey = Trim$(CStr(outHeaders(LBound(outHeaders) + oc - 1)))
 
-        Dim ic As Long
-        ic = Excel_FindHeaderIndex(inHeaders, h)
+        Dim outHash As Long
+        outHash = Json_Hash32_FNV1a(outKey)
 
-        If ic > 0 And ic <= inCols Then
+        Dim foundIdx As Long
+        foundIdx = 0
+
+        mask = cap - 1
+        pos = (outHash And mask)
+
+        Do
+            If slotIdx(pos) = 0 Then Exit Do
+
+            If slotHash(pos) = outHash Then
+                If StrComp(Trim$(CStr(inHeaders(LBound(inHeaders) + slotIdx(pos) - 1))), outKey, vbTextCompare) = 0 Then
+                    foundIdx = slotIdx(pos)
+                    Exit Do
+                End If
+            End If
+
+            pos = (pos + 1) And mask
+        Loop
+
+        If foundIdx > 0 And foundIdx <= inCols Then
+            Dim srcCol As Long
+            srcCol = LBound(inData, 2) + foundIdx - 1
+
             Dim r As Long
             For r = 1 To inRows
-                outArr(r, oc) = inData(LBound(inData, 1) + r - 1, LBound(inData, 2) + ic - 1)
+                outArr(r, oc) = inData(LBound(inData, 1) + r - 1, srcCol)
             Next r
         End If
     Next oc
@@ -4959,4 +5310,147 @@ Private Function Json_ObjectShapeMatches( _
     
     Json_ObjectShapeMatches = True
 
+End Function
+
+Private Sub Excel_ReleaseVariantObject(ByRef v As Variant)
+    If IsObject(v) Then
+        Set v = Nothing
+    Else
+        v = Empty
+    End If
+End Sub
+
+Private Sub Json_RowObjectCollectHeaders( _
+    ByVal obj As Collection, _
+    ByVal prefix As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef hdrs() As String, _
+    ByRef hdrCount As Long, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByRef cap As Long _
+)
+    Dim i As Long
+    For i = 2 To obj.count
+        Dim pair As Variant
+        pair = obj(i)
+
+        Dim seg As String
+        seg = Json_EscapePathSegment(CStr(pair(0)))
+
+        Dim path As String
+        If Len(prefix) = 0 Then
+            path = seg
+        Else
+            path = prefix & "." & seg
+        End If
+
+        Json_RowValueCollectHeaders pair(1), path, nonTableArraysAsJson, hdrs, hdrCount, slotHash, slotIdx, cap
+    Next i
+End Sub
+
+Private Sub Json_RowValueCollectHeaders( _
+    ByVal v As Variant, _
+    ByVal path As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef hdrs() As String, _
+    ByRef hdrCount As Long, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByRef cap As Long _
+)
+    If Not IsObject(v) Then
+        HeaderTable_Ensure path, hdrs, hdrCount, slotHash, slotIdx, cap, False
+        Exit Sub
+    End If
+
+    If TypeName(v) <> "Collection" Then
+        HeaderTable_Ensure path, hdrs, hdrCount, slotHash, slotIdx, cap, False
+        Exit Sub
+    End If
+
+    If Json_IsObject(v) Then
+        Json_RowObjectCollectHeaders v, path, nonTableArraysAsJson, hdrs, hdrCount, slotHash, slotIdx, cap
+        Exit Sub
+    End If
+
+    If nonTableArraysAsJson Then
+        HeaderTable_Ensure path, hdrs, hdrCount, slotHash, slotIdx, cap, False
+    End If
+End Sub
+
+Private Sub Json_RowObjectFillRow( _
+    ByVal obj As Collection, _
+    ByVal prefix As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef hdrs() As String, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByVal cap As Long, _
+    ByRef outData As Variant, _
+    ByVal rowNumber As Long _
+)
+    Dim i As Long
+    For i = 2 To obj.count
+        Dim pair As Variant
+        pair = obj(i)
+
+        Dim seg As String
+        seg = Json_EscapePathSegment(CStr(pair(0)))
+
+        Dim path As String
+        If Len(prefix) = 0 Then
+            path = seg
+        Else
+            path = prefix & "." & seg
+        End If
+
+        Json_RowValueFill pair(1), path, nonTableArraysAsJson, hdrs, slotHash, slotIdx, cap, outData, rowNumber
+    Next i
+End Sub
+
+Private Sub Json_RowValueFill( _
+    ByVal v As Variant, _
+    ByVal path As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef hdrs() As String, _
+    ByRef slotHash() As Long, _
+    ByRef slotIdx() As Long, _
+    ByVal cap As Long, _
+    ByRef outData As Variant, _
+    ByVal rowNumber As Long _
+)
+    Dim col As Long
+
+    If Not IsObject(v) Then
+        col = HeaderTable_Find(path, hdrs, slotHash, slotIdx, cap)
+        If col > 0 Then outData(rowNumber, col) = v
+        Exit Sub
+    End If
+
+    If TypeName(v) <> "Collection" Then
+        col = HeaderTable_Find(path, hdrs, slotHash, slotIdx, cap)
+        If col > 0 Then outData(rowNumber, col) = CStr(TypeName(v))
+        Exit Sub
+    End If
+
+    If Json_IsObject(v) Then
+        Json_RowObjectFillRow v, path, nonTableArraysAsJson, hdrs, slotHash, slotIdx, cap, outData, rowNumber
+        Exit Sub
+    End If
+
+    If nonTableArraysAsJson Then
+        col = HeaderTable_Find(path, hdrs, slotHash, slotIdx, cap)
+        If col > 0 Then outData(rowNumber, col) = Json_Stringify(v)
+    End If
+End Sub
+
+Private Function Excel_GetRowsPerChunk(ByVal colCount As Long) As Long
+    If colCount <= 0 Then
+        Excel_GetRowsPerChunk = 1
+        Exit Function
+    End If
+
+    Excel_GetRowsPerChunk = EXCEL_CHUNK_MAX_CELLS \ colCount
+    If Excel_GetRowsPerChunk < 1 Then Excel_GetRowsPerChunk = 1
 End Function
