@@ -33,6 +33,7 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
 - [HTTP Helper (Windows)](#http-helper-windows)
 - [Schema Control](#schema-control)
 - [Deterministic Errors](#deterministic-errors)
+- [Function & Subroutine Reference](#function--subroutine-reference)
 
 ------------------------------------------------------------------------
 
@@ -679,3 +680,134 @@ Errors protect against:
 -   Column collapse
 -   Partial table corruption
 -   Ambiguous data states
+
+------------------------------------------------------------------------
+
+## Function / Subroutine Reference
+
+### Enums
+
+- `Public Enum ExcelSourceFormat`  
+  Source format selector for `Excel_UpsertListObjectFromSource`.
+
+  - `ExcelSourceFormat_JSON = 1`  
+    Treat input as JSON text.
+  - `ExcelSourceFormat_CSV = 2`  
+    Treat input as CSV text.
+  - `ExcelSourceFormat_XML = 3`  
+    Treat input as XML text.
+
+### JSON Parse / Serialize
+
+- `Public Function Json_Parse(ByVal jsonText As String) As Variant`  
+  Parses JSON text into the module’s in-memory model. Returns a tagged `Collection` for objects, an untagged `Collection` for arrays, or a primitive `Variant` for scalar values.
+
+- `Public Sub Json_ParseInto(ByVal jsonText As String, ByRef outValue As Variant)`  
+  Parses JSON text into an output `Variant` passed by reference.
+
+- `Public Function Json_Stringify(ByVal v As Variant) As String`  
+  Serializes the in-memory JSON model back into deterministic JSON text.
+
+## JSON Type / Object Helpers
+
+- `Public Function Json_IsObject(ByVal v As Variant) As Boolean`  
+  Returns `True` when `v` is a tagged JSON object in this library’s model.
+
+- `Public Function Json_IsArray(ByVal v As Variant) As Boolean`  
+  Returns `True` when `v` is an untagged JSON array in this library’s model.
+
+- `Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value As Variant)`  
+  Sets or overwrites a property on a tagged JSON object while preserving deterministic order.
+
+- `Public Function Json_ObjGet(ByVal obj As Collection, ByVal key As String) As Variant`  
+  Gets a property value from a tagged JSON object. Raises an error if the key is missing.
+
+- `Public Function Json_TryObjGet(ByVal obj As Collection, ByVal key As String, ByRef outValue As Variant) As Boolean`  
+  Attempts to get a property value from a tagged JSON object without raising when the key is missing.
+
+### Flatten / Unflatten / Path Utilities
+
+- `Public Function Json_Flatten(ByVal parsedJson As Variant, Optional ByVal maxDepth As Long = 12, Optional ByVal tableRootToExpand As String = vbNullString, Optional ByVal arrayMode As Long = 0) As Collection`  
+  Flattens nested JSON into a tagged object of `[path, value]` pairs for inspection, extraction, and table shaping.
+
+- `Public Function Json_FlatGet(ByVal flatObj As Collection, ByVal path As String) As Variant`  
+  Returns the primitive value stored at an exact flattened path.
+
+- `Public Function Json_FlatContains(ByVal flatObj As Collection, ByVal path As String) As Boolean`  
+  Returns `True` if the flattened object contains an exact path.
+
+- `Public Function Json_Unflatten(ByVal flatObj As Collection) As Collection`  
+  Reconstructs a nested tagged object from flattened `[path, value]` pairs. Array index paths are not supported.
+
+- `Public Function Json_TryResolvePath(ByVal root As Variant, ByVal path As String, ByRef outValue As Variant) As Boolean`  
+  Resolves a minimal JSONPath-like expression such as `$.orders[0].id`.
+
+- `Public Function Json_TryReadBracketIndex(ByVal path As String, ByRef i As Long, ByRef outIndex As Long) As Boolean`  
+  Low-level helper that parses a bracket index like `[3]` from a path string.
+
+- `Public Function Json_ResolveArrayPath(ByVal root As Variant, ByVal path As String) As Collection`  
+  Resolves a simple path like `$.products` directly to a JSON array collection.
+
+### Array-of-Object Discovery / Table Extraction
+
+- `Public Function Json_FindArrayObjectRoots(ByVal flatObj As Collection, Optional ByVal stopAfterFirst As Boolean = False) As Collection`  
+  Scans flattened paths and returns candidate roots that look like array-of-object tables.
+
+- `Public Function Json_ExtractTableRows(ByVal flatObj As Collection, ByVal tableRoot As String) As Collection`  
+  Extracts tagged row objects from flattened JSON for a specific table root.
+
+- `Public Function Json_TableTo2D(ByVal rows As Collection, ByRef headers As Variant) As Variant`  
+  Converts a collection of tagged row objects into a 2D Excel-ready array and outputs headers in first-seen order.
+
+### Excel ListObject Helpers / Upsert Pipeline
+
+- `Public Function Excel_GetListObject(ByVal ws As Worksheet, ByVal tableName As String) As ListObject`  
+  Finds a `ListObject` by name on a worksheet.
+
+- `Public Function Excel_EnsureListObject(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant) As ListObject`  
+  Ensures a table exists. Creates it if missing using the supplied header list and top-left anchor.
+
+- `Public Sub Excel_UpsertListObjectOnSheet(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, ByVal data2D As Variant, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True)`  
+  Core Excel upsert entry point for writing headers and a 2D array into a `ListObject`, with schema evolution and formula-preservation options.
+
+- `Public Sub Excel_ResizeTableToRowCol(ByVal lo As ListObject, ByVal finalHeaders As Variant, ByVal bodyRowCount As Long)`  
+  Resizes a `ListObject` to the requested header/body shape while handling Excel table materialization edge cases.
+
+- `Public Sub Excel_UpsertListObjectFromJsonAtRoot(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal jsonText As String, ByVal tableRoot As String, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
+  High-level JSON-to-table ingestion entry point. Parses JSON, resolves a root array-of-objects, shapes rows and headers, then upserts into Excel.
+
+- `Public Function Excel_ListObjectToJson(ByVal lo As ListObject, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
+  Converts an Excel table into a JSON array-of-objects. Supports nested dot-path headers and optional parsing of JSON text stored inside cells.
+
+- `Public Sub Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
+  Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline.
+
+### CSV / XML Adapters
+
+- `Public Function CsvFileToJson(ByVal filePath As String) As String`  
+  Reads a CSV file from disk and converts it into a JSON array-of-objects.
+
+- `Public Function CsvTextToJson(ByVal txt As String) As String`  
+  Converts raw CSV text into a JSON array-of-objects using the module’s built-in CSV parser.
+
+- `Public Function XmlFileToJson(ByVal filePath As String) As String`  
+  Reads an XML file from disk and converts it into JSON.
+
+- `Public Function XmlTextToJson(ByVal txt As String) As String`  
+  Converts raw XML text into JSON using the module’s lightweight pure-VBA XML parser.
+
+### JSON Coalescing Utilities
+
+- `Public Function Json_CoalesceChildArrays(ByVal parentJson As String, ByVal parentRoot As String, ByVal childProperty As String, Optional ByVal strictMode As Boolean = False, Optional ByVal parentKeyMap As Collection = Nothing) As String`  
+  Pulls child arrays out of parent rows and merges them into one JSON array, optionally injecting parent fields, literals, or formulas.
+
+- `Public Function Json_CoalesceArraysFromStrings(ByVal jsonStrings As Collection, Optional ByVal strictMode As Boolean = False) As String`  
+  Merges multiple JSON array strings into a single JSON array string, with optional strict shape validation.
+
+- `Public Function Json_CoalesceArraysFromRange(ByVal rng As Range, Optional ByVal strictMode As Boolean = False) As String`  
+  Reads JSON array strings from an Excel range and merges them into one JSON array string.
+
+### Excel Range Utility
+
+- `Public Function Excel_RangeToJsonStrings(ByVal rng As Range) As Collection`  
+  Reads non-empty cell values from a range and returns them as a collection of trimmed JSON strings.
