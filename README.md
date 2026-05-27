@@ -10,6 +10,8 @@ Pure VBA. No dependencies. No silent schema drift.
 \
 Take nested or complex API payloads and  convert them into normalized Excel tables with parent keys preserved. Supports Excel formula and scalar value injection.
 
+<a href="https://github.com/sponsors/WilliamSmithEdward"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?style=for-the-badge" alt="Sponsor WilliamSmithEdward"></a>
+
 ------------------------------------------------------------------------
 
 ## Contents
