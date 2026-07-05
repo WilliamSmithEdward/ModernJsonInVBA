@@ -539,71 +539,85 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
 
     On Error GoTo Fail
 
-    Dim parsed As Variant
-    Json_ParseInto jsonText, parsed
-
-    If (Not IsObject(parsed)) Or (TypeName(parsed) <> "Collection") Then
-        Err.Raise vbObjectError + 1130, SRC, _
-            "JSON root must be an object or array (Collection). Primitive root is not supported for table upsert."
-    End If
-
-    Dim resolved As Variant
-    If Not Json_TryResolvePath(parsed, tableRoot, resolved) Then
-        Err.Raise vbObjectError + 1160, SRC, "tableRoot not found: " & tableRoot
-    End If
-
-    If Not IsNull(resolved) Then
-        If (Not IsObject(resolved)) _
-            Or (TypeName(resolved) <> "Collection") _
-            Or Json_IsObject(resolved) Then
-            Err.Raise vbObjectError + 1162, SRC, _
-                "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
-        End If
-    End If
-
-    Dim arr As Collection
-    If IsNull(resolved) Then
-        Set arr = New Collection
-    Else
-        Set arr = resolved
-    End If
-
-    Dim rowCount As Long
-    rowCount = arr.count
-
-    ' SINGLE pass over the rows: validate each element, then fill its cells
-    ' into one 2D array while headers register on the fly (the array's
-    ' column dimension grows as new paths appear; see Json_RowObjectFillRow).
-    ' Nothing touches the sheet until the one upsert call at the end, so a
-    ' validation failure still leaves the table untouched - the same
-    ' guarantee the old validate-then-collect-then-fill triple sweep gave,
-    ' at a third of the traversal cost. For Each throughout: indexed arr(i)
-    ' access walks the Collection's linked list and is quadratic.
     Dim headerIdx As JsonStringIndex
     JsonIdx_Init headerIdx, 64
 
     Dim data As Variant
-    Dim rowVar As Variant
-    Dim rowObj As Collection
-    Dim rowIndex As Long
+    Dim rowCount As Long
 
-    If rowCount > 0 Then
-        ReDim data(1 To rowCount, 1 To 8)   ' columns grow on demand
+    ' Fast path for the root table ("$", the overwhelmingly common case):
+    ' stream the JSON text straight into the 2D array + header index without
+    ' building the Collection model at all. The stream declines (returns
+    ' False) when the root is not an array, and the model path below then
+    ' owns the root-shape error semantics.
+    Dim streamed As Boolean
+    streamed = False
 
-        rowIndex = 0
-        For Each rowVar In arr
-            rowIndex = rowIndex + 1
+    If Trim$(tableRoot) = "$" Then
+        streamed = Json_TryParseTableStream(jsonText, nonTableArraysAsJson, headerIdx, data, rowCount, SRC, tableRoot)
+    End If
 
-            If (Not IsObject(rowVar)) _
-                Or (TypeName(rowVar) <> "Collection") _
-                Or (Not Json_IsObject(rowVar)) Then
-                Err.Raise vbObjectError + 1163, SRC, _
-                    "Array element at index " & (rowIndex - 1) & " is not an object for root: " & tableRoot
+    If Not streamed Then
+        Dim parsed As Variant
+        Json_ParseInto jsonText, parsed
+
+        If (Not IsObject(parsed)) Or (TypeName(parsed) <> "Collection") Then
+            Err.Raise vbObjectError + 1130, SRC, _
+                "JSON root must be an object or array (Collection). Primitive root is not supported for table upsert."
+        End If
+
+        Dim resolved As Variant
+        If Not Json_TryResolvePath(parsed, tableRoot, resolved) Then
+            Err.Raise vbObjectError + 1160, SRC, "tableRoot not found: " & tableRoot
+        End If
+
+        If Not IsNull(resolved) Then
+            If (Not IsObject(resolved)) _
+                Or (TypeName(resolved) <> "Collection") _
+                Or Json_IsObject(resolved) Then
+                Err.Raise vbObjectError + 1162, SRC, _
+                    "tableRoot must resolve to an array-of-objects (or null): " & tableRoot
             End If
+        End If
 
-            Set rowObj = rowVar
-            Json_RowObjectFillRow rowObj, vbNullString, nonTableArraysAsJson, headerIdx, data, rowIndex
-        Next rowVar
+        Dim arr As Collection
+        If IsNull(resolved) Then
+            Set arr = New Collection
+        Else
+            Set arr = resolved
+        End If
+
+        rowCount = arr.count
+
+        ' SINGLE pass over the rows: validate each element, then fill its
+        ' cells into one 2D array while headers register on the fly (the
+        ' array's column dimension grows as new paths appear; see
+        ' Json_RowObjectFillRow). Nothing touches the sheet until the one
+        ' upsert call at the end, so a validation failure still leaves the
+        ' table untouched. For Each throughout: indexed arr(i) access walks
+        ' the Collection's linked list and is quadratic.
+        Dim rowVar As Variant
+        Dim rowObj As Collection
+        Dim rowIndex As Long
+
+        If rowCount > 0 Then
+            ReDim data(1 To rowCount, 1 To 8)   ' columns grow on demand
+
+            rowIndex = 0
+            For Each rowVar In arr
+                rowIndex = rowIndex + 1
+
+                If (Not IsObject(rowVar)) _
+                    Or (TypeName(rowVar) <> "Collection") _
+                    Or (Not Json_IsObject(rowVar)) Then
+                    Err.Raise vbObjectError + 1163, SRC, _
+                        "Array element at index " & (rowIndex - 1) & " is not an object for root: " & tableRoot
+                End If
+
+                Set rowObj = rowVar
+                Json_RowObjectFillRow rowObj, vbNullString, nonTableArraysAsJson, headerIdx, data, rowIndex
+            Next rowVar
+        End If
     End If
 
     ' Resolve the final schema and trim the array's spare column capacity.

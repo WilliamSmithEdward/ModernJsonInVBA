@@ -17,9 +17,12 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
 - [Introduction](#introduction)
 - [What This Solves](#what-this-solves)
 - [Core Capabilities](#core-capabilities)
-- [Real-World Performance](#real-world-performance---vba-json--excel-upsert-benchmark)
+- [Performance](#performance)
+  - [Loading JSON into Excel tables](#loading-json-into-excel-tables)
+  - [Core JSON engine](#core-json-engine)
+  - [Reproducing these numbers](#reproducing-these-numbers)
 - [Installation](#installation)
-  - [Option 1 — Copy Into Your Workbook](#option-1--copy-into-your-workbook)
+  - [Option 1 — Import Into Your Workbook](#option-1--import-into-your-workbook)
   - [Option 2 — Use the Provided Workbook](#option-2--use-the-provided-workbook)
 - [Requirements](#requirements)
 - [Basic API Example](#basic-api-example)
@@ -128,20 +131,76 @@ Excel ListObject Upsert
 </pre>
 ------------------------------------------------------------------------
 
-## Real-World Performance - VBA JSON → Excel Upsert Benchmark
+## Performance
 
-| Stage   | Seconds  |
-|---------|----------|
-| HTTP    | 0.019531 |
-| Parse   | 0.011719 |
-| Write   | 0.000000 |
-| Upsert  | 0.015625 |
-| **Total** | **0.046875** |
+All figures below come from the reproducible benchmark suite in
+[`json_payloads/`](json_payloads) — seven deterministic, generated payloads
+totalling ~200 MB, driven by the `Run_JsonPerfSuite` macro in the workbook.
 
-**Payload:** 55,040 bytes  
-**Rows:** 100  
-**Columns:** 4  
-**Throughput:** **7314.28 cells/sec**
+**Benchmark environment**
+
+- AMD Ryzen 7 9800X3D, 64 GB RAM
+- Excel 16.0, 64-bit VBA
+- Payloads read from local disk; times are wall-clock via `Timer`
+
+Everything is pure VBA — no `Scripting.Dictionary`, no COM references, no
+external libraries.
+
+### Loading JSON into Excel tables
+
+Full path from a JSON file on disk to a populated, refreshable Excel
+ListObject (`Excel_UpsertListObjectFromJsonAtRoot`). The **Create** column
+is the one-shot load of a fresh table; **Refresh** re-loads the same table
+in place (clear + rewrite). Rows/sec and cells/sec are for Create.
+
+| Payload | Rows × Cols | File | Create | Refresh | Rows/sec | Cells/sec |
+|---|---|---:|---:|---:|---:|---:|
+| Flat, small | 10,000 × 10 | 2.1 MB | 0.44 s | 0.50 s | 22,700 | 227,000 |
+| Flat, medium | 100,000 × 10 | 21.6 MB | 4.53 s | 5.06 s | 22,100 | 221,000 |
+| **Flat, large** | **500,000 × 10** | **109.5 MB** | **23.5 s** | **26.1 s** | **21,200** | **212,000** |
+| Numeric-heavy | 200,000 × 8 | 25.9 MB | 6.57 s | 7.59 s | 30,500 | 244,000 |
+| Escape-dense | 50,000 × 6 | 14.8 MB | 2.43 s | 2.53 s | 20,600 | 124,000 |
+| Nested objects | 50,000 × 9 | 9.2 MB | 2.92 s | 3.00 s | 17,100 | 154,000 |
+| Wide schema | 5,000 × 200 | 16.0 MB | 4.04 s | 4.67 s | 1,240 | 248,000 |
+
+> A **half-million-row, 110 MB** JSON document becomes a fully materialized
+> Excel table in **~24 seconds** — the whole document is written to the
+> sheet in a single block, with no chunking.
+
+Cell throughput holds around **210,000–250,000 cells/sec** regardless of row
+count; it dips only when a column is unusually escape-heavy (the escape
+payload is deliberately hostile — every string carries quotes, backslashes,
+newlines, and emoji). Nested payloads reconstruct dotted column paths
+(`customer.address.city`) and still clear 150,000 cells/sec.
+
+### Core JSON engine
+
+Standalone engine operations (no worksheet involved), measured on the same
+payloads:
+
+| Operation | Throughput | Notes |
+|---|---|---|
+| `Json_Parse` → model | 6–11 MB/s | full recursive-descent parse into the tagged-Collection model |
+| `Json_Stringify` ← model | 5–9 MB/s | model back to compact JSON text |
+| `Excel_ListObjectToJson` | 3–13 MB/s | table → JSON array-of-objects |
+
+For example, `Json_Parse` turns the 21.6 MB / 100,000-row document into the
+in-memory model in **2.4 s**, and `Json_Stringify` serializes it back in
+**2.8 s**. The table upsert path is faster than a raw parse because it
+streams JSON text straight into a 2-D array for the common root table,
+bypassing model construction entirely.
+
+### Reproducing these numbers
+
+```text
+1. python json_payloads/generate_payloads.py     ' generate the payloads
+2. Open ModernJsonInVBA.xlsm, press ALT+F11, then Ctrl+G (Immediate window)
+3. Run_JsonPerfSuite
+```
+
+The macro prints a Markdown report (like the tables above) to the Immediate
+window, ready to paste into an issue or PR. Drop your own `*.json` files
+into `json_payloads/` and they are picked up automatically.
 
 ## Installation
 

@@ -12,6 +12,10 @@ Option Explicit
 '   JSON Array  => VBA Collection (untagged)
 '   Primitives  => Variant (Null, Boolean, Long/Double, String)
 '
+' Json_TryParseTableStream (internal) is an alternative sink over the same
+' reader: it streams a root array-of-objects directly into a 2D array plus
+' header index for Excel ingestion, skipping model construction entirely.
+'
 ' Strictness follows RFC 8259: no leading zeros, no trailing commas, no
 ' unescaped control characters, surrogate pairs validated, no trailing text.
 '
@@ -216,25 +220,42 @@ End Sub
 
 ' Reads a strict JSON number. Integers that fit a Long come back as Long;
 ' everything else (fractions, exponents, overflow) comes back as Double.
+'
+' Integers of up to nine digits (the overwhelming majority - ids, counts)
+' are accumulated directly during the scan; only longer integers and
+' non-integers pay for the substring + CLng/CDbl conversion.
 Private Function JR_ReadNumber(ByRef r As JsonReader) As Variant
     JR_SkipWs r
 
     Dim startPos As Long
     startPos = r.pos
 
+    Dim negative As Boolean
+
     Dim c As Long
     c = JR_CodeAt(r)
     If c = 45 Then          ' "-"
+        negative = True
         r.pos = r.pos + 1
         c = JR_CodeAt(r)
     End If
 
+    Dim acc As Long
+    Dim digitCount As Long
+
     ' Integer part: "0" alone, or a nonzero digit followed by digits.
     If c = 48 Then          ' "0"
+        digitCount = 1
         r.pos = r.pos + 1
         c = JR_CodeAt(r)
     ElseIf c >= 49 And c <= 57 Then
         Do
+            ' Nine accumulated digits max 999,999,999: never overflows.
+            If digitCount < 9 Then
+                acc = acc * 10 + (c - 48)
+            End If
+            digitCount = digitCount + 1
+
             r.pos = r.pos + 1
             c = JR_CodeAt(r)
         Loop While c >= 48 And c <= 57
@@ -273,6 +294,18 @@ Private Function JR_ReadNumber(ByRef r As JsonReader) As Variant
             r.pos = r.pos + 1
             c = JR_CodeAt(r)
         Loop While c >= 48 And c <= 57
+    End If
+
+    If isIntegral Then
+        If digitCount <= 9 Then
+            ' Exact value already accumulated: no substring, no CLng.
+            If negative Then
+                JR_ReadNumber = -acc
+            Else
+                JR_ReadNumber = acc
+            End If
+            Exit Function
+        End If
     End If
 
     Dim numText As String
@@ -326,7 +359,7 @@ Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
 
     ' Fast path: no escapes before the closing quote.
     If relB = 0 Then
-        JR_ValidateNoControlChars chunk, chunkStart
+        JR_ValidateRange r, chunkStart, qPos - 1
         r.pos = qPos + 1
         JR_ReadJsonString = chunk
         Exit Function
@@ -344,10 +377,8 @@ Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
     Do
         ' Clean run before the escape.
         If relB > cs Then
-            Dim runText As String
-            runText = Mid$(chunk, cs, relB - cs)
-            JR_ValidateNoControlChars runText, chunkStart + cs - 1
-            JsonSB_Append sb, runText
+            JR_ValidateRange r, chunkStart + cs - 1, chunkStart + relB - 2
+            JsonSB_Append sb, Mid$(chunk, cs, relB - cs)
         End If
 
         If relB = Len(chunk) Then
@@ -392,10 +423,8 @@ Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
 
         If relB = 0 Then
             If cs <= Len(chunk) Then
-                Dim tailText As String
-                tailText = Mid$(chunk, cs)
-                JR_ValidateNoControlChars tailText, chunkStart + cs - 1
-                JsonSB_Append sb, tailText
+                JR_ValidateRange r, chunkStart + cs - 1, qPos - 1
+                JsonSB_Append sb, Mid$(chunk, cs)
             End If
             r.pos = qPos + 1
             JR_ReadJsonString = JsonSB_Text(sb)
@@ -405,22 +434,16 @@ Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
 End Function
 
 ' JSON forbids unescaped control characters (U+0000..U+001F) inside strings.
-' The chunk is scanned as UTF-16 byte pairs: a control character is a low
-' byte under 32 with a zero high byte.
-Private Sub JR_ValidateNoControlChars(ByRef chunk As String, ByVal chunkStartPos As Long)
-    Dim n As Long
-    n = Len(chunk)
-    If n = 0 Then Exit Sub
-
-    Dim b() As Byte
-    b = chunk
-
+' Validates positions fromPos..toPos directly against the reader's byte
+' snapshot (no substring copy): a control character is a low byte under 32
+' with a zero high byte.
+Private Sub JR_ValidateRange(ByRef r As JsonReader, ByVal fromPos As Long, ByVal toPos As Long)
     Dim i As Long
-    For i = 0 To 2 * n - 2 Step 2
-        If b(i) < 32 Then
-            If b(i + 1) = 0 Then
+    For i = fromPos To toPos
+        If r.bytes((i - 1) * 2) < 32 Then
+            If r.bytes((i - 1) * 2 + 1) = 0 Then
                 Err.Raise vbObjectError + 526, ERR_SRC, _
-                    "Unescaped control character in string at pos " & (chunkStartPos + (i \ 2))
+                    "Unescaped control character in string at pos " & i
             End If
         End If
     Next i
@@ -576,3 +599,245 @@ Private Function JR_ReadObject(ByRef r As JsonReader) As Collection
 
     Set JR_ReadObject = obj
 End Function
+
+' =============================================================================
+' Streaming table sink (internal: used by Excel_UpsertListObjectFromJsonAtRoot)
+' =============================================================================
+
+' Stream a root-level JSON array-of-objects directly into a 2D Variant array
+' plus a header index, without building the Collection model. Cell values,
+' header discovery order, duplicate-key overwrites, and the validations the
+' model path performs are reproduced exactly:
+'
+'   - nested objects contribute dotted, escaped column paths
+'   - nested arrays are fully parsed through the model (so their content is
+'     validated) and either stringified into the cell or discarded,
+'     depending on nonTableArraysAsJson
+'   - a non-object element raises 1163 with the caller-supplied source
+'   - trailing text after the array raises 700, like Json_ParseInto
+'
+' Returns False WITHOUT raising when the root value is not an array; the
+' caller then falls back to the model path, which owns the root-shape error
+' semantics (1130/1160/1162).
+Public Function Json_TryParseTableStream( _
+    ByVal jsonText As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef headerIdx As JsonStringIndex, _
+    ByRef outData As Variant, _
+    ByRef outRowCount As Long, _
+    ByVal rowErrorSource As String, _
+    ByVal tableRootLabel As String _
+) As Boolean
+
+    Json_TryParseTableStream = False
+    outRowCount = 0
+
+    Dim r As JsonReader
+    JR_Init r, jsonText
+
+    JR_SkipWs r
+    If JR_CodeAt(r) <> 91 Then Exit Function    ' root is not an array
+
+    ' Committed to streaming. Pre-count the top-level elements so the row
+    ' dimension (which ReDim Preserve cannot grow) is allocated exactly.
+    Dim rowCap As Long
+    rowCap = JR_CountTopLevelElements(r)
+
+    r.pos = r.pos + 1
+    JR_SkipWs r
+
+    If JR_CodeAt(r) = 93 Then                   ' "]": empty array
+        r.pos = r.pos + 1
+        JR_CheckTrailing r
+        Json_TryParseTableStream = True
+        Exit Function
+    End If
+
+    If rowCap < 1 Then rowCap = 1
+    ReDim outData(1 To rowCap, 1 To 8)          ' columns grow on demand
+
+    Do
+        JR_SkipWs r
+
+        If JR_CodeAt(r) <> 123 Then
+            Err.Raise vbObjectError + 1163, rowErrorSource, _
+                "Array element at index " & outRowCount & " is not an object for root: " & tableRootLabel
+        End If
+
+        outRowCount = outRowCount + 1
+        If outRowCount > UBound(outData, 1) Then JR_GrowRows outData
+
+        JR_StreamObjectRow r, vbNullString, nonTableArraysAsJson, headerIdx, outData, outRowCount
+
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 44             ' ","
+                r.pos = r.pos + 1
+            Case 93             ' "]"
+                r.pos = r.pos + 1
+                Exit Do
+            Case Else
+                Err.Raise vbObjectError + 730, ERR_SRC, "Expected ',' or ']' at pos " & r.pos
+        End Select
+    Loop
+
+    JR_CheckTrailing r
+    Json_TryParseTableStream = True
+End Function
+
+' Stream one object's members into row rowNumber, recursing into nested
+' objects with dotted paths (mirrors Json_RowValueFill's rules).
+Private Sub JR_StreamObjectRow( _
+    ByRef r As JsonReader, _
+    ByVal prefix As String, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef headerIdx As JsonStringIndex, _
+    ByRef outData As Variant, _
+    ByVal rowNumber As Long _
+)
+    r.pos = r.pos + 1                           ' consume "{"
+    JR_SkipWs r
+
+    If JR_CodeAt(r) = 125 Then                  ' "}": empty object
+        r.pos = r.pos + 1
+        Exit Sub
+    End If
+
+    Do
+        Dim key As String
+        key = JR_ReadJsonString(r)
+
+        JR_SkipWs r
+        JR_ExpectChar r, 58, ":"
+
+        Dim path As String
+        If Len(prefix) = 0 Then
+            path = Json_EscapePathSegment(key)
+        Else
+            path = prefix & "." & Json_EscapePathSegment(key)
+        End If
+
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 123            ' nested object: dotted columns
+                JR_StreamObjectRow r, path, nonTableArraysAsJson, headerIdx, outData, rowNumber
+
+            Case 91             ' nested array: parse (validates) then keep or drop
+                Dim av As Variant
+                Json_ReadValue r, av
+
+                If nonTableArraysAsJson Then
+                    JR_WriteCell headerIdx, outData, rowNumber, path, Json_Stringify(av)
+                End If
+
+            Case Else           ' primitive (or a syntax error, raised here)
+                Dim v As Variant
+                Json_ReadValue r, v
+                JR_WriteCell headerIdx, outData, rowNumber, path, v
+        End Select
+
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 44             ' ","
+                r.pos = r.pos + 1
+                JR_SkipWs r
+            Case 125            ' "}"
+                r.pos = r.pos + 1
+                Exit Do
+            Case Else
+                Err.Raise vbObjectError + 760, ERR_SRC, "Expected ',' or '}' at pos " & r.pos
+        End Select
+    Loop
+End Sub
+
+Private Sub JR_WriteCell( _
+    ByRef headerIdx As JsonStringIndex, _
+    ByRef outData As Variant, _
+    ByVal rowNumber As Long, _
+    ByRef path As String, _
+    ByRef v As Variant _
+)
+    Dim col As Long
+    col = JsonIdx_Ensure(headerIdx, path)
+
+    Json_Grow2DCols outData, col
+    outData(rowNumber, col) = v
+End Sub
+
+' Count elements of the array starting at the cursor's "[" (cursor is not
+' moved): commas at depth 1 plus one, tracked with a string-aware scan.
+' Exact for well-formed JSON; malformed input raises during the real parse,
+' and JR_GrowRows guards the fill regardless.
+Private Function JR_CountTopLevelElements(ByRef r As JsonReader) As Long
+    Dim L As Long
+    L = Len(r.text)
+
+    Dim depth As Long
+    Dim count As Long
+    Dim inString As Boolean
+
+    Dim i As Long
+    i = r.pos
+
+    Do While i <= L
+        Dim c As Long
+        c = r.bytes((i - 1) * 2) + r.bytes((i - 1) * 2 + 1) * 256&
+
+        If inString Then
+            If c = 92 Then          ' "\": skip the escaped character
+                i = i + 1
+            ElseIf c = 34 Then      ' closing quote
+                inString = False
+            End If
+        Else
+            Select Case c
+                Case 34             ' opening quote
+                    inString = True
+                Case 91, 123        ' "[" / "{"
+                    depth = depth + 1
+                Case 93, 125        ' "]" / "}"
+                    depth = depth - 1
+                    If depth = 0 Then Exit Do
+                Case 44             ' ","
+                    If depth = 1 Then count = count + 1
+            End Select
+        End If
+
+        i = i + 1
+    Loop
+
+    JR_CountTopLevelElements = count + 1
+End Function
+
+' Row-dimension growth safety net: ReDim Preserve cannot grow the first
+' dimension, so grow by allocating double and copying. Unreachable for
+' well-formed input (rows are pre-counted exactly).
+Private Sub JR_GrowRows(ByRef outData As Variant)
+    Dim oldRows As Long
+    Dim cols As Long
+    oldRows = UBound(outData, 1)
+    cols = UBound(outData, 2)
+
+    Dim newData As Variant
+    ReDim newData(1 To oldRows * 2, 1 To cols)
+
+    Dim rr As Long
+    Dim cc As Long
+    For rr = 1 To oldRows
+        For cc = 1 To cols
+            newData(rr, cc) = outData(rr, cc)
+        Next cc
+    Next rr
+
+    outData = newData
+End Sub
+
+Private Sub JR_CheckTrailing(ByRef r As JsonReader)
+    JR_SkipWs r
+    If Not JR_Eof(r) Then
+        Err.Raise vbObjectError + 700, ERR_SRC, "Unexpected trailing characters at pos " & r.pos
+    End If
+End Sub

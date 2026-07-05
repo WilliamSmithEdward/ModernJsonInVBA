@@ -273,6 +273,21 @@ Private Function Json_HashString(ByRef s As String) As Long
     Json_HashString = h
 End Function
 
+' Grow a 2D Variant array's column dimension (doubling) so column col
+' exists. Only the LAST dimension of an array can be grown with ReDim
+' Preserve, which is why tabular buffers in this library are (rows, cols).
+Public Sub Json_Grow2DCols(ByRef outData As Variant, ByVal col As Long)
+    Dim capNow As Long
+    capNow = UBound(outData, 2)
+    If col <= capNow Then Exit Sub
+
+    Do While capNow < col
+        capNow = capNow * 2
+    Loop
+
+    ReDim Preserve outData(1 To UBound(outData, 1), 1 To capNow)
+End Sub
+
 ' =============================================================================
 ' Variant assignment
 ' =============================================================================
@@ -297,6 +312,15 @@ End Sub
 ' =============================================================================
 
 Public Function Json_EscapePathSegment(ByVal s As String) As String
+    ' Fast path: most keys contain neither escapable character, and Replace$
+    ' allocates a fresh copy even when it changes nothing.
+    If InStr(1, s, "\", vbBinaryCompare) = 0 Then
+        If InStr(1, s, ".", vbBinaryCompare) = 0 Then
+            Json_EscapePathSegment = s
+            Exit Function
+        End If
+    End If
+
     s = Replace$(s, "\", "\\")
     s = Replace$(s, ".", "\.")
     Json_EscapePathSegment = s

@@ -157,10 +157,77 @@ Public Function Excel_ListObjectToJson( _
             ") do not match header count (" & colCount & ")."
     End If
 
-    ' ---- Build model ----
-    Dim arr As New Collection
+    Dim anyNested As Boolean
+    For c = 1 To colCount
+        If colIsNested(c) Then anyNested = True
+    Next c
 
     Dim r As Long
+    Dim v As Variant
+    Dim isBlank As Boolean
+
+    ' ---- Streaming path (all headers simple, the common case) ----
+    ' Serialize straight from the bulk-read array into one text builder: no
+    ' per-row model Collections, and each key is quoted/escaped once per
+    ' column instead of once per cell. Output is byte-identical to the model
+    ' path because keys and values go through the same serializer writer.
+    If Not anyNested Then
+        Dim keyPrefix() As String
+        ReDim keyPrefix(1 To colCount) As String
+
+        Dim ksb As JsonTextBuilder
+        Dim kv As Variant
+        For c = 1 To colCount
+            JsonSB_Init ksb, Len(colSimpleKey(c)) + 8
+            kv = colSimpleKey(c)
+            Json_StringifyInto ksb, kv
+            keyPrefix(c) = JsonSB_Text(ksb) & ":"
+        Next c
+
+        Dim out As JsonTextBuilder
+        JsonSB_Init out, rowCount * colCount * 12 + 16
+
+        JsonSB_Append out, "["
+
+        For r = 1 To rowCount
+            If r > 1 Then JsonSB_Append out, ","
+            JsonSB_Append out, "{"
+
+            Dim firstMember As Boolean
+            firstMember = True
+
+            For c = 1 To colCount
+                isBlank = Excel_ResolveCellValue(data, formulas, r, c, _
+                    parseJsonInCells, parseArraysOnly, preserveFormulas, SRC, v)
+
+                If isBlank Then
+                    If Not includeBlanksAsNull Then GoTo NextStreamCell
+                    v = Null
+                End If
+
+                If Not firstMember Then JsonSB_Append out, ","
+                firstMember = False
+
+                JsonSB_Append out, keyPrefix(c)
+                Json_StringifyInto out, v
+
+NextStreamCell:
+            Next c
+
+            JsonSB_Append out, "}"
+        Next r
+
+        JsonSB_Append out, "]"
+
+        Excel_ListObjectToJson = JsonSB_Text(out)
+        Exit Function
+    End If
+
+    ' ---- Model path (dotted headers present) ----
+    ' Nested paths can interleave across columns, so rows build through the
+    ' model where Json_UnflattenInsertTokens merges shared parents.
+    Dim arr As New Collection
+
     For r = 1 To rowCount
 
         Dim rowObj As Collection
@@ -168,72 +235,8 @@ Public Function Excel_ListObjectToJson( _
         rowObj.Add JSON_TAG_OBJECT
 
         For c = 1 To colCount
-            Dim v As Variant
-            v = data(LBound(data, 1) + r - 1, LBound(data, 2) + c - 1)
-
-            If IsError(v) Then
-                Err.Raise vbObjectError + 1170, SRC, _
-                    "Excel error value at row " & r & ", col " & c
-            End If
-
-            ' 1) JSON structure parsed from cell text.
-            Dim parsedJson As Boolean
-            parsedJson = False
-
-            If parseJsonInCells Then
-                If VarType(v) = vbString Then
-                    Dim s As String
-                    s = Trim$(CStr(v))
-
-                    If Len(s) > 0 Then
-                        Dim firstCh As String
-                        firstCh = Left$(s, 1)
-
-                        Dim looksJson As Boolean
-                        If parseArraysOnly Then
-                            looksJson = (firstCh = "[")
-                        Else
-                            looksJson = (firstCh = "[" Or firstCh = "{")
-                        End If
-
-                        If looksJson Then
-                            Dim parsedCell As Variant
-                            If Excel_TryParseJsonCell(s, parsedCell) Then
-                                If IsObject(parsedCell) Then
-                                    If TypeName(parsedCell) = "Collection" Then
-                                        If Json_IsObject(parsedCell) Or Json_IsArray(parsedCell) Then
-                                            Json_VarAssign v, parsedCell
-                                            parsedJson = True
-                                        End If
-                                    End If
-                                End If
-                            End If
-                        End If
-                    End If
-                End If
-            End If
-
-            ' 2) Formula text.
-            If preserveFormulas And Not parsedJson Then
-                Dim f As Variant
-                f = formulas(LBound(formulas, 1) + r - 1, LBound(formulas, 2) + c - 1)
-
-                If VarType(f) = vbString Then
-                    If Len(f) > 0 Then
-                        If Left$(f, 1) = "=" Then
-                            v = f
-                        End If
-                    End If
-                End If
-            End If
-
-            ' 3) Raw value / blank handling.
-            Dim isBlank As Boolean
-            If VarType(v) = vbString Then
-                isBlank = (LenB(v) = 0)
-            Else
-                isBlank = IsEmpty(v)
-            End If
+            isBlank = Excel_ResolveCellValue(data, formulas, r, c, _
+                parseJsonInCells, parseArraysOnly, preserveFormulas, SRC, v)
 
             If isBlank Then
                 If Not includeBlanksAsNull Then GoTo NextCell
@@ -257,6 +260,90 @@ NextCell:
     Next r
 
     Excel_ListObjectToJson = Json_Stringify(arr)
+End Function
+
+' Resolve one cell to its export value, applying the documented precedence:
+' parsed JSON structure, then formula text, then the raw value. Returns True
+' when the cell is blank. Raises 1170 on Excel error values.
+Private Function Excel_ResolveCellValue( _
+    ByRef data As Variant, _
+    ByRef formulas As Variant, _
+    ByVal r As Long, _
+    ByVal c As Long, _
+    ByVal parseJsonInCells As Boolean, _
+    ByVal parseArraysOnly As Boolean, _
+    ByVal preserveFormulas As Boolean, _
+    ByVal errSource As String, _
+    ByRef outV As Variant _
+) As Boolean
+
+    Dim v As Variant
+    v = data(LBound(data, 1) + r - 1, LBound(data, 2) + c - 1)
+
+    If IsError(v) Then
+        Err.Raise vbObjectError + 1170, errSource, _
+            "Excel error value at row " & r & ", col " & c
+    End If
+
+    ' 1) JSON structure parsed from cell text.
+    Dim parsedJson As Boolean
+    parsedJson = False
+
+    If parseJsonInCells Then
+        If VarType(v) = vbString Then
+            Dim s As String
+            s = Trim$(CStr(v))
+
+            If Len(s) > 0 Then
+                Dim firstCh As String
+                firstCh = Left$(s, 1)
+
+                Dim looksJson As Boolean
+                If parseArraysOnly Then
+                    looksJson = (firstCh = "[")
+                Else
+                    looksJson = (firstCh = "[" Or firstCh = "{")
+                End If
+
+                If looksJson Then
+                    Dim parsedCell As Variant
+                    If Excel_TryParseJsonCell(s, parsedCell) Then
+                        If IsObject(parsedCell) Then
+                            If TypeName(parsedCell) = "Collection" Then
+                                If Json_IsObject(parsedCell) Or Json_IsArray(parsedCell) Then
+                                    Json_VarAssign v, parsedCell
+                                    parsedJson = True
+                                End If
+                            End If
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    End If
+
+    ' 2) Formula text.
+    If preserveFormulas And Not parsedJson Then
+        Dim f As Variant
+        f = formulas(LBound(formulas, 1) + r - 1, LBound(formulas, 2) + c - 1)
+
+        If VarType(f) = vbString Then
+            If Len(f) > 0 Then
+                If Left$(f, 1) = "=" Then
+                    v = f
+                End If
+            End If
+        End If
+    End If
+
+    ' 3) Blank detection.
+    If VarType(v) = vbString Then
+        Excel_ResolveCellValue = (LenB(v) = 0)
+    Else
+        Excel_ResolveCellValue = IsEmpty(v)
+    End If
+
+    Json_VarAssign outV, v
 End Function
 
 ' Parse cell text with the engine parser without ever raising; returns True

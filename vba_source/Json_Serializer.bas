@@ -51,6 +51,13 @@ Public Function Json_Stringify(ByVal v As Variant) As String
     Json_Stringify = JsonSB_Text(sb)
 End Function
 
+' Internal: append one model value (any shape, same rules and errors as
+' Json_Stringify) to an external text builder. Lets streaming callers embed
+' values without allocating intermediate strings per value.
+Public Sub Json_StringifyInto(ByRef sb As JsonTextBuilder, ByRef v As Variant)
+    JsonW_WriteValue sb, v
+End Sub
+
 ' =============================================================================
 ' Writer internals
 ' =============================================================================

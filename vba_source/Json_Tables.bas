@@ -333,14 +333,14 @@ Private Sub Json_RowValueFill( _
 
     If Not IsObject(v) Then
         col = JsonIdx_Ensure(headerIdx, path)
-        RowData_EnsureCols outData, col
+        Json_Grow2DCols outData, col
         outData(rowNumber, col) = v
         Exit Sub
     End If
 
     If TypeName(v) <> "Collection" Then
         col = JsonIdx_Ensure(headerIdx, path)
-        RowData_EnsureCols outData, col
+        Json_Grow2DCols outData, col
         outData(rowNumber, col) = CStr(TypeName(v))
         Exit Sub
     End If
@@ -353,22 +353,9 @@ Private Sub Json_RowValueFill( _
     ' JSON array: only a column when arrays are kept as JSON text.
     If nonTableArraysAsJson Then
         col = JsonIdx_Ensure(headerIdx, path)
-        RowData_EnsureCols outData, col
+        Json_Grow2DCols outData, col
         outData(rowNumber, col) = Json_Stringify(v)
     End If
-End Sub
-
-' Grow outData's column dimension (doubling) so column col exists.
-Private Sub RowData_EnsureCols(ByRef outData As Variant, ByVal col As Long)
-    Dim capNow As Long
-    capNow = UBound(outData, 2)
-    If col <= capNow Then Exit Sub
-
-    Do While capNow < col
-        capNow = capNow * 2
-    Loop
-
-    ReDim Preserve outData(1 To UBound(outData, 1), 1 To capNow)
 End Sub
 
 ' =============================================================================
