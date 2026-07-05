@@ -18,8 +18,9 @@ Option Explicit
 ' Performance notes:
 '   - Strings are read by scanning ahead with InStr and copying whole runs;
 '     escape-free strings (the common case) are returned with a single Mid$.
-'   - Whitespace and number scanning compare character codes (AscW) instead
-'     of allocating one-character strings.
+'   - All character-level scanning reads UTF-16 code units from a byte-array
+'     snapshot of the input (bytes = text is one native copy). Mid$-based
+'     probing would allocate a fresh one-character string per position.
 '
 ' Error numbers (all vbObjectError + n):
 '   520 expected character
@@ -33,9 +34,12 @@ Option Explicit
 
 Private Const ERR_SRC As String = "ModernJsonInVBA"
 
-' Reader state: 1-based cursor over the input text.
+' Reader state: 1-based cursor over the input text. bytes holds the same
+' text as UTF-16 code units (little-endian byte pairs) so scanning loops can
+' read character codes without allocating.
 Private Type JsonReader
     text As String
+    bytes() As Byte
     pos As Long
 End Type
 
@@ -92,18 +96,25 @@ End Sub
 Private Sub JR_Init(ByRef r As JsonReader, ByVal jsonText As String)
     r.text = jsonText
     r.pos = 1
+    If Len(jsonText) > 0 Then
+        r.bytes = jsonText
+    End If
 End Sub
 
 Private Function JR_Eof(ByRef r As JsonReader) As Boolean
     JR_Eof = (r.pos > Len(r.text))
 End Function
 
-' Character code at the cursor, or -1 at end of input.
+' Character code (0..65535) at the cursor, or -1 at end of input. Unlike
+' AscW this never goes negative for high code points, so range checks are
+' straightforward.
 Private Function JR_CodeAt(ByRef r As JsonReader) As Long
     If r.pos > Len(r.text) Then
         JR_CodeAt = -1
     Else
-        JR_CodeAt = AscW(Mid$(r.text, r.pos, 1))
+        Dim off As Long
+        off = (r.pos - 1) * 2
+        JR_CodeAt = r.bytes(off) + r.bytes(off + 1) * 256&
     End If
 End Function
 
@@ -112,7 +123,10 @@ Private Sub JR_SkipWs(ByRef r As JsonReader)
     L = Len(r.text)
 
     Do While r.pos <= L
-        Select Case AscW(Mid$(r.text, r.pos, 1))
+        Dim off As Long
+        off = (r.pos - 1) * 2
+
+        Select Case r.bytes(off) + r.bytes(off + 1) * 256&
             Case 32, 9, 13, 10   ' space, tab, CR, LF
                 r.pos = r.pos + 1
             Case Else
@@ -121,8 +135,13 @@ Private Sub JR_SkipWs(ByRef r As JsonReader)
     Loop
 End Sub
 
-Private Sub JR_ExpectChar(ByRef r As JsonReader, ByVal expected As String)
+Private Sub JR_ExpectChar(ByRef r As JsonReader, ByVal expectedCode As Long, ByRef expectedChar As String)
     JR_SkipWs r
+
+    If JR_CodeAt(r) = expectedCode Then
+        r.pos = r.pos + 1
+        Exit Sub
+    End If
 
     Dim ch As String
     If r.pos <= Len(r.text) Then
@@ -132,10 +151,8 @@ Private Sub JR_ExpectChar(ByRef r As JsonReader, ByVal expected As String)
         ch = vbNullString
     End If
 
-    If ch <> expected Then
-        Err.Raise vbObjectError + 520, ERR_SRC, _
-            "Expected '" & expected & "' at pos " & (r.pos - 1) & " but got '" & ch & "'"
-    End If
+    Err.Raise vbObjectError + 520, ERR_SRC, _
+        "Expected '" & expectedChar & "' at pos " & (r.pos - 1) & " but got '" & ch & "'"
 End Sub
 
 Private Sub JR_ExpectLiteral(ByRef r As JsonReader, ByVal lit As String)
@@ -156,39 +173,38 @@ End Sub
 Private Sub Json_ReadValue(ByRef r As JsonReader, ByRef outValue As Variant)
     JR_SkipWs r
 
-    Dim ch As String
-    If r.pos <= Len(r.text) Then ch = Mid$(r.text, r.pos, 1) Else ch = vbNullString
-
-    Select Case ch
-        Case """"
+    Select Case JR_CodeAt(r)
+        Case 34                     ' quote
             outValue = JR_ReadJsonString(r)
 
-        Case "t"
+        Case 116                    ' "t"
             JR_ExpectLiteral r, "true"
             outValue = True
 
-        Case "f"
+        Case 102                    ' "f"
             JR_ExpectLiteral r, "false"
             outValue = False
 
-        Case "n"
+        Case 110                    ' "n"
             JR_ExpectLiteral r, "null"
             outValue = Null
 
-        Case "-", "0" To "9"
+        Case 45, 48 To 57           ' "-", "0".."9"
             outValue = JR_ReadNumber(r)
 
-        Case "["
+        Case 91                     ' "["
             Dim arr As Collection
             Set arr = JR_ReadArray(r)
             Set outValue = arr
 
-        Case "{"
+        Case 123                    ' "{"
             Dim obj As Collection
             Set obj = JR_ReadObject(r)
             Set outValue = obj
 
         Case Else
+            Dim ch As String
+            If r.pos <= Len(r.text) Then ch = Mid$(r.text, r.pos, 1) Else ch = vbNullString
             Err.Raise vbObjectError + 701, ERR_SRC, _
                 "Unexpected token '" & ch & "' at pos " & r.pos
     End Select
@@ -291,7 +307,7 @@ End Function
 ' the text builder.
 Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
     JR_SkipWs r
-    JR_ExpectChar r, """"
+    JR_ExpectChar r, 34, """"
 
     Dim qPos As Long
     qPos = InStr(r.pos, r.text, """", vbBinaryCompare)
@@ -389,16 +405,23 @@ Private Function JR_ReadJsonString(ByRef r As JsonReader) As String
 End Function
 
 ' JSON forbids unescaped control characters (U+0000..U+001F) inside strings.
-' AscW returns negative values for code points above U+7FFF, which correctly
-' fall outside the 0..31 check.
+' The chunk is scanned as UTF-16 byte pairs: a control character is a low
+' byte under 32 with a zero high byte.
 Private Sub JR_ValidateNoControlChars(ByRef chunk As String, ByVal chunkStartPos As Long)
+    Dim n As Long
+    n = Len(chunk)
+    If n = 0 Then Exit Sub
+
+    Dim b() As Byte
+    b = chunk
+
     Dim i As Long
-    For i = 1 To Len(chunk)
-        Dim c As Long
-        c = AscW(Mid$(chunk, i, 1))
-        If c >= 0 And c < 32 Then
-            Err.Raise vbObjectError + 526, ERR_SRC, _
-                "Unescaped control character in string at pos " & (chunkStartPos + i - 1)
+    For i = 0 To 2 * n - 2 Step 2
+        If b(i) < 32 Then
+            If b(i + 1) = 0 Then
+                Err.Raise vbObjectError + 526, ERR_SRC, _
+                    "Unescaped control character in string at pos " & (chunkStartPos + (i \ 2))
+            End If
         End If
     Next i
 End Sub
@@ -442,8 +465,11 @@ Private Function JR_ReadHex4(ByRef r As JsonReader) As Long
     Dim v As Long
     Dim i As Long
     For i = 0 To 3
+        Dim off As Long
+        off = (r.pos + i - 1) * 2
+
         Dim c As Long
-        c = AscW(Mid$(r.text, r.pos + i, 1))
+        c = r.bytes(off) + r.bytes(off + 1) * 256&
 
         Select Case c
             Case 48 To 57       ' 0-9
@@ -467,7 +493,7 @@ End Function
 
 Private Function JR_ReadArray(ByRef r As JsonReader) As Collection
     JR_SkipWs r
-    JR_ExpectChar r, "["
+    JR_ExpectChar r, 91, "["
 
     Dim result As New Collection
     JR_SkipWs r
@@ -501,7 +527,7 @@ End Function
 
 Private Function JR_ReadObject(ByRef r As JsonReader) As Collection
     JR_SkipWs r
-    JR_ExpectChar r, "{"
+    JR_ExpectChar r, 123, "{"
 
     Dim obj As New Collection
     obj.Add JSON_TAG_OBJECT
@@ -519,7 +545,7 @@ Private Function JR_ReadObject(ByRef r As JsonReader) As Collection
         key = JR_ReadJsonString(r)
 
         JR_SkipWs r
-        JR_ExpectChar r, ":"
+        JR_ExpectChar r, 58, ":"
 
         Dim value As Variant
         Json_ReadValue r, value

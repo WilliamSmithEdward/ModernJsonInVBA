@@ -24,10 +24,13 @@ Option Explicit
 ' DTDs, namespaces (namespace prefixes are kept as part of the name).
 '
 ' Performance notes:
+'   - Structural scanning reads UTF-16 code units from a byte-array snapshot
+'     of the input (one native copy); Mid$-based probing would allocate a
+'     one-character string per position.
 '   - JSON assembly and entity decoding use the shared text builder; text
 '     runs are copied in chunks located with InStr.
-'   - Repeated-name grouping is a single pass over the children (previously
-'     O(n^2) name counting per element).
+'   - Children accumulate in plain arrays and repeated-name grouping is a
+'     single hash-indexed pass.
 '
 ' Error numbers (all vbObjectError + n, source "XmlTextToJson"):
 '   821 parser stalled (malformed)   822 unexpected end / bad CDATA
@@ -58,12 +61,15 @@ Public Function XmlTextToJson(ByVal txt As String) As String
         End If
     End If
 
+    Dim xb() As Byte
+    If Len(txt) > 0 Then xb = txt
+
     Dim pos As Long
     pos = 1
 
-    Xml_SkipWhitespace txt, pos
+    Xml_SkipWhitespace xb, pos, Len(txt)
 
-    XmlTextToJson = Xml_ParseNode(txt, pos)
+    XmlTextToJson = Xml_ParseNode(txt, xb, pos)
 End Function
 
 ' =============================================================================
@@ -72,22 +78,33 @@ End Function
 
 ' Parse one element starting at "<" and return its JSON representation.
 ' Advances pos past the element's closing tag.
-Private Function Xml_ParseNode(ByVal txt As String, ByRef pos As Long) As String
+Private Function Xml_ParseNode(ByRef txt As String, ByRef xb() As Byte, ByRef pos As Long) As String
     Dim L As Long
     L = Len(txt)
 
     pos = pos + 1                    ' consume "<"
-    Xml_ReadName txt, pos
+    Xml_ReadName txt, xb, pos
 
-    Xml_SkipAttributes txt, pos
+    Xml_SkipAttributes txt, xb, pos
 
-    If Mid$(txt, pos, 2) = "/>" Then
-        pos = pos + 2
-        Xml_ParseNode = "null"
-        Exit Function
+    ' Self-closing "/>" ?
+    If pos < L Then
+        If xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256& = 47 Then
+            If xb(pos * 2) + xb(pos * 2 + 1) * 256& = 62 Then
+                pos = pos + 2
+                Xml_ParseNode = "null"
+                Exit Function
+            End If
+        End If
     End If
 
-    If Mid$(txt, pos, 1) = ">" Then
+    Dim tagClose As Long
+    tagClose = -1
+    If pos <= L Then
+        tagClose = xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
+    End If
+
+    If tagClose = 62 Then            ' ">"
         pos = pos + 1
     Else
         Err.Raise vbObjectError + 824, ERR_SRC, "Malformed XML: expected '>'."
@@ -107,31 +124,50 @@ Private Function Xml_ParseNode(ByVal txt As String, ByRef pos As Long) As String
         Dim startPos As Long
         startPos = pos
 
-        Xml_SkipWhitespace txt, pos
+        Xml_SkipWhitespace xb, pos, L
 
-        If Mid$(txt, pos, 2) = "</" Then
-            pos = pos + 2
-            Xml_ReadName txt, pos
-            If Mid$(txt, pos, 1) = ">" Then pos = pos + 1
-            Exit Do
+        Dim c As Long
+        c = -1
+        If pos <= L Then
+            c = xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
         End If
 
-        If Mid$(txt, pos, 9) = "<![CDATA[" Then
-            Dim cEnd As Long
-            cEnd = InStr(pos + 9, txt, "]]>")
-
-            If cEnd = 0 Then
-                Err.Raise vbObjectError + 822, ERR_SRC, "Unterminated CDATA section."
+        If c = 60 Then               ' "<"
+            Dim c2 As Long
+            c2 = -1
+            If pos < L Then
+                c2 = xb(pos * 2) + xb(pos * 2 + 1) * 256&
             End If
 
-            textBuffer = textBuffer & Mid$(txt, pos + 9, cEnd - (pos + 9))
-            pos = cEnd + 3
+            If c2 = 47 Then          ' "</": this element's closing tag
+                pos = pos + 2
+                Xml_ReadName txt, xb, pos
 
-            GoTo ContinueLoop
-        End If
+                If pos <= L Then
+                    If xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256& = 62 Then
+                        pos = pos + 1
+                    End If
+                End If
+                Exit Do
+            End If
 
-        If Mid$(txt, pos, 1) = "<" Then
-            ' Peek the child's name without consuming, then parse it.
+            If c2 = 33 Then          ' "<!": possible CDATA section
+                If Mid$(txt, pos, 9) = "<![CDATA[" Then
+                    Dim cEnd As Long
+                    cEnd = InStr(pos + 9, txt, "]]>")
+
+                    If cEnd = 0 Then
+                        Err.Raise vbObjectError + 822, ERR_SRC, "Unterminated CDATA section."
+                    End If
+
+                    textBuffer = textBuffer & Mid$(txt, pos + 9, cEnd - (pos + 9))
+                    pos = cEnd + 3
+
+                    GoTo ContinueLoop
+                End If
+            End If
+
+            ' Child element: peek its name without consuming, then parse.
             Dim tmp As Long
             tmp = pos + 1
 
@@ -144,8 +180,8 @@ Private Function Xml_ParseNode(ByVal txt As String, ByRef pos As Long) As String
                 ReDim Preserve childValues(1 To UBound(childValues) * 2) As String
             End If
 
-            childNames(childCount) = Xml_ReadName(txt, tmp)
-            childValues(childCount) = Xml_ParseNode(txt, pos)
+            childNames(childCount) = Xml_ReadName(txt, xb, tmp)
+            childValues(childCount) = Xml_ParseNode(txt, xb, pos)
         Else
             Dim textVal As String
             textVal = Xml_ReadText(txt, pos)
@@ -259,18 +295,19 @@ ContinueLoop:
 End Function
 
 ' Read an XML name at pos ([A-Za-z_:] then [A-Za-z0-9_.:-]*).
-' Character-code comparisons instead of Like: Like recompiles its pattern on
-' every call, which dominated profile time on element-dense documents.
-Private Function Xml_ReadName(ByVal txt As String, ByRef pos As Long) As String
+Private Function Xml_ReadName(ByRef txt As String, ByRef xb() As Byte, ByRef pos As Long) As String
     Dim startPos As Long
     startPos = pos
 
-    If pos > Len(txt) Then
+    Dim L As Long
+    L = Len(txt)
+
+    If pos > L Then
         Err.Raise vbObjectError + 822, ERR_SRC, "Unexpected end while reading tag name."
     End If
 
     Dim c As Long
-    c = AscW(Mid$(txt, pos, 1))
+    c = xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
 
     ' A-Z, a-z, "_", ":"
     Select Case c
@@ -281,8 +318,8 @@ Private Function Xml_ReadName(ByVal txt As String, ByRef pos As Long) As String
 
     pos = pos + 1
 
-    Do While pos <= Len(txt)
-        c = AscW(Mid$(txt, pos, 1))
+    Do While pos <= L
+        c = xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
 
         ' A-Z, a-z, 0-9, "_", ".", ":", "-"
         Select Case c
@@ -297,7 +334,7 @@ Private Function Xml_ReadName(ByVal txt As String, ByRef pos As Long) As String
 End Function
 
 ' Read text content up to the next "<" (or end of input) and decode entities.
-Private Function Xml_ReadText(ByVal txt As String, ByRef pos As Long) As String
+Private Function Xml_ReadText(ByRef txt As String, ByRef pos As Long) As String
     Dim startPos As Long
     startPos = pos
 
@@ -313,12 +350,9 @@ Private Function Xml_ReadText(ByVal txt As String, ByRef pos As Long) As String
     Xml_ReadText = Xml_DecodeEntities(Mid$(txt, startPos, pos - startPos))
 End Function
 
-Private Sub Xml_SkipWhitespace(ByVal txt As String, ByRef pos As Long)
-    Dim L As Long
-    L = Len(txt)
-
+Private Sub Xml_SkipWhitespace(ByRef xb() As Byte, ByRef pos As Long, ByVal L As Long)
     Do While pos <= L
-        Select Case AscW(Mid$(txt, pos, 1))
+        Select Case xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
             Case 32, 13, 10, 9
                 pos = pos + 1
             Case Else
@@ -329,22 +363,32 @@ End Sub
 
 ' Skip everything up to the tag-closing ">" or "/", honoring quoted
 ' attribute values so a ">" inside quotes does not end the tag.
-Private Sub Xml_SkipAttributes(ByVal txt As String, ByRef pos As Long)
-    Do While pos <= Len(txt)
-        Dim ch As String
-        ch = Mid$(txt, pos, 1)
+Private Sub Xml_SkipAttributes(ByRef txt As String, ByRef xb() As Byte, ByRef pos As Long)
+    Dim L As Long
+    L = Len(txt)
 
-        Select Case ch
-            Case """", "'"
-                Dim closeQuote As Long
-                closeQuote = InStr(pos + 1, txt, ch)
-                If closeQuote = 0 Then
-                    pos = Len(txt) + 1
+    Do While pos <= L
+        Select Case xb((pos - 1) * 2) + xb((pos - 1) * 2 + 1) * 256&
+
+            Case 34             ' double quote
+                Dim closeDq As Long
+                closeDq = InStr(pos + 1, txt, """", vbBinaryCompare)
+                If closeDq = 0 Then
+                    pos = L + 1
                     Exit Sub
                 End If
-                pos = closeQuote
+                pos = closeDq
 
-            Case ">", "/"
+            Case 39             ' single quote
+                Dim closeSq As Long
+                closeSq = InStr(pos + 1, txt, "'", vbBinaryCompare)
+                If closeSq = 0 Then
+                    pos = L + 1
+                    Exit Sub
+                End If
+                pos = closeSq
+
+            Case 62, 47         ' ">" or "/"
                 Exit Sub
         End Select
 
@@ -357,40 +401,45 @@ End Sub
 ' =============================================================================
 
 ' Append s to the builder with JSON escaping (quote, backslash, \b \t \n
-' \f \r, \uXXXX for remaining control characters).
+' \f \r, \uXXXX for remaining control characters). The scan reads UTF-16
+' byte pairs from a one-time snapshot; only characters with a zero high
+' byte can need escaping.
 Private Sub Xml_AppendEscapedJson(ByRef sb As JsonTextBuilder, ByRef s As String)
     Dim L As Long
     L = Len(s)
+    If L = 0 Then Exit Sub
+
+    Dim b() As Byte
+    b = s
 
     Dim runStart As Long
     runStart = 1
 
     Dim i As Long
     For i = 1 To L
-        Dim c As Long
-        c = AscW(Mid$(s, i, 1))
+        If b((i - 1) * 2 + 1) = 0 Then
+            Dim escText As String
+            escText = vbNullString
 
-        Dim escText As String
-        escText = vbNullString
+            Select Case b((i - 1) * 2)
+                Case 34: escText = "\"""
+                Case 92: escText = "\\"
+                Case 8:  escText = "\b"
+                Case 9:  escText = "\t"
+                Case 10: escText = "\n"
+                Case 12: escText = "\f"
+                Case 13: escText = "\r"
+                Case 0 To 31
+                    escText = "\u" & Right$("0000" & Hex$(b((i - 1) * 2)), 4)
+            End Select
 
-        Select Case c
-            Case 34: escText = "\"""
-            Case 92: escText = "\\"
-            Case 8:  escText = "\b"
-            Case 9:  escText = "\t"
-            Case 10: escText = "\n"
-            Case 12: escText = "\f"
-            Case 13: escText = "\r"
-            Case 0 To 31
-                escText = "\u" & Right$("0000" & Hex$(c), 4)
-        End Select
-
-        If Len(escText) > 0 Then
-            If i > runStart Then
-                JsonSB_Append sb, Mid$(s, runStart, i - runStart)
+            If Len(escText) > 0 Then
+                If i > runStart Then
+                    JsonSB_Append sb, Mid$(s, runStart, i - runStart)
+                End If
+                JsonSB_Append sb, escText
+                runStart = i + 1
             End If
-            JsonSB_Append sb, escText
-            runStart = i + 1
         End If
     Next i
 

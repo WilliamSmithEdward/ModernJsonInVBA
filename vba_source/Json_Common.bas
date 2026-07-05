@@ -231,9 +231,9 @@ End Sub
 
 Private Function JsonIdx_HashKey(ByRef m As JsonStringIndex, ByRef key As String) As Long
     If m.textCompare Then
-        JsonIdx_HashKey = Json_Hash32_FNV1a(LCase$(key))
+        JsonIdx_HashKey = Json_HashString(LCase$(key))
     Else
-        JsonIdx_HashKey = Json_Hash32_FNV1a(key)
+        JsonIdx_HashKey = Json_HashString(key)
     End If
 End Function
 
@@ -245,41 +245,32 @@ Private Function JsonIdx_KeysEqual(ByRef m As JsonStringIndex, ByRef a As String
     End If
 End Function
 
-' FNV-1a 32-bit over UTF-16 code units.
+' Rolling hash over UTF-16 code units, read from a byte-array snapshot of
+' the string (one native copy instead of a one-character Mid$ allocation
+' per position).
 '
-' The 32-bit modular multiply is done with Double intermediates split into
-' 16-bit halves (exact: every product stays below 2^42 < 2^53), avoiding
-' LongLong so the code compiles on 32-bit Office.
-Private Function Json_Hash32_FNV1a(ByRef s As String) As Long
-    Const FNV_PRIME As Double = 16777619#
-    Const TWO16 As Double = 65536#
-    Const TWO32 As Double = 4294967296#
+' The multiplier stays overflow-safe in pure Long arithmetic by masking the
+' accumulator to 22 bits before each multiply (max 4194303 * 37 + 65535 <
+' 2^31). Hash quality only affects probe length: JsonStringIndex always
+' confirms with a full key comparison, so collisions cost time, never
+' correctness.
+Private Function Json_HashString(ByRef s As String) As Long
+    Dim n As Long
+    n = Len(s)
+    If n = 0 Then Exit Function
+
+    Dim b() As Byte
+    b = s
 
     Dim h As Long
-    h = &H811C9DC5
+    h = n
 
     Dim i As Long
-    For i = 1 To Len(s)
-        h = h Xor (AscW(Mid$(s, i, 1)) And &HFFFF&)
-
-        Dim lo As Double
-        Dim hi As Double
-        lo = (h And &HFFFF&) * FNV_PRIME
-        hi = (((h And &HFFFF0000) \ &H10000) And &HFFFF&) * FNV_PRIME
-        hi = hi - Int(hi / TWO16) * TWO16
-
-        Dim u As Double
-        u = lo + hi * TWO16
-        u = u - Int(u / TWO32) * TWO32
-
-        If u > 2147483647# Then
-            h = CLng(u - TWO32)
-        Else
-            h = CLng(u)
-        End If
+    For i = 0 To 2 * n - 2 Step 2
+        h = (h And &H3FFFFF) * 37 + b(i) + b(i + 1) * 256&
     Next i
 
-    Json_Hash32_FNV1a = h
+    Json_HashString = h
 End Function
 
 ' =============================================================================

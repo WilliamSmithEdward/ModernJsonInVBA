@@ -275,34 +275,17 @@ Public Function Json_TableTo2D(ByVal rows As Collection, ByRef headers As Varian
 End Function
 
 ' =============================================================================
-' Internal: row-object header collection and row filling
+' Internal: single-pass row filling with header discovery
 '
-' Used by Json_Excel to stream array-of-object rows into 2D chunks without
-' flattening the whole document first. Nested objects contribute dotted
-' column paths; nested arrays are included (as JSON text) only when
-' nonTableArraysAsJson is True.
+' Used by Json_Excel to stream array-of-object rows into ONE 2D array in a
+' single pass: unseen column paths register in headerIdx on the fly, and the
+' array's column dimension grows as needed (ReDim Preserve is legal on the
+' last dimension). Earlier rows keep Empty in late-appearing columns, which
+' matches the old two-pass collect/fill semantics exactly.
+'
+' Nested objects contribute dotted column paths; nested arrays are included
+' (as JSON text) only when nonTableArraysAsJson is True.
 ' =============================================================================
-
-Public Sub Json_RowObjectCollectHeaders( _
-    ByVal obj As Collection, _
-    ByVal prefix As String, _
-    ByVal nonTableArraysAsJson As Boolean, _
-    ByRef headerIdx As JsonStringIndex _
-)
-    Dim isFirst As Boolean
-    isFirst = True
-
-    Dim pair As Variant
-    For Each pair In obj
-        If isFirst Then
-            isFirst = False
-        Else
-            Json_RowValueCollectHeaders pair(1), _
-                RowPath_Append(prefix, CStr(pair(0))), _
-                nonTableArraysAsJson, headerIdx
-        End If
-    Next pair
-End Sub
 
 Public Sub Json_RowObjectFillRow( _
     ByVal obj As Collection, _
@@ -338,33 +321,6 @@ Private Function RowPath_Append(ByRef prefix As String, ByVal key As String) As 
     End If
 End Function
 
-Private Sub Json_RowValueCollectHeaders( _
-    ByVal v As Variant, _
-    ByVal path As String, _
-    ByVal nonTableArraysAsJson As Boolean, _
-    ByRef headerIdx As JsonStringIndex _
-)
-    If Not IsObject(v) Then
-        JsonIdx_Ensure headerIdx, path
-        Exit Sub
-    End If
-
-    If TypeName(v) <> "Collection" Then
-        JsonIdx_Ensure headerIdx, path
-        Exit Sub
-    End If
-
-    If Json_IsObject(v) Then
-        Json_RowObjectCollectHeaders v, path, nonTableArraysAsJson, headerIdx
-        Exit Sub
-    End If
-
-    ' JSON array: only a column when arrays are kept as JSON text.
-    If nonTableArraysAsJson Then
-        JsonIdx_Ensure headerIdx, path
-    End If
-End Sub
-
 Private Sub Json_RowValueFill( _
     ByVal v As Variant, _
     ByVal path As String, _
@@ -376,14 +332,16 @@ Private Sub Json_RowValueFill( _
     Dim col As Long
 
     If Not IsObject(v) Then
-        col = JsonIdx_Find(headerIdx, path)
-        If col > 0 Then outData(rowNumber, col) = v
+        col = JsonIdx_Ensure(headerIdx, path)
+        RowData_EnsureCols outData, col
+        outData(rowNumber, col) = v
         Exit Sub
     End If
 
     If TypeName(v) <> "Collection" Then
-        col = JsonIdx_Find(headerIdx, path)
-        If col > 0 Then outData(rowNumber, col) = CStr(TypeName(v))
+        col = JsonIdx_Ensure(headerIdx, path)
+        RowData_EnsureCols outData, col
+        outData(rowNumber, col) = CStr(TypeName(v))
         Exit Sub
     End If
 
@@ -392,10 +350,25 @@ Private Sub Json_RowValueFill( _
         Exit Sub
     End If
 
+    ' JSON array: only a column when arrays are kept as JSON text.
     If nonTableArraysAsJson Then
-        col = JsonIdx_Find(headerIdx, path)
-        If col > 0 Then outData(rowNumber, col) = Json_Stringify(v)
+        col = JsonIdx_Ensure(headerIdx, path)
+        RowData_EnsureCols outData, col
+        outData(rowNumber, col) = Json_Stringify(v)
     End If
+End Sub
+
+' Grow outData's column dimension (doubling) so column col exists.
+Private Sub RowData_EnsureCols(ByRef outData As Variant, ByVal col As Long)
+    Dim capNow As Long
+    capNow = UBound(outData, 2)
+    If col <= capNow Then Exit Sub
+
+    Do While capNow < col
+        capNow = capNow * 2
+    Loop
+
+    ReDim Preserve outData(1 To UBound(outData, 1), 1 To capNow)
 End Sub
 
 ' =============================================================================

@@ -51,6 +51,11 @@ Public Function CsvTextToJson(ByVal txt As String) As String
     Dim L As Long
     L = Len(txt)
 
+    ' UTF-16 snapshot: structural scanning reads byte pairs instead of
+    ' allocating a one-character string per position.
+    Dim tb() As Byte
+    If L > 0 Then tb = txt
+
     Dim i As Long
     i = 1
 
@@ -79,7 +84,7 @@ Public Function CsvTextToJson(ByVal txt As String) As String
             End If
 
         Else
-            Select Case AscW(Mid$(txt, i, 1))
+            Select Case tb((i - 1) * 2) + tb((i - 1) * 2 + 1) * 256&
 
                 Case 34         ' quote: enter quoted mode
                     inQuotes = True
@@ -105,7 +110,7 @@ Public Function CsvTextToJson(ByVal txt As String) As String
                     runStart = i
 
                     Do While i <= L
-                        Select Case AscW(Mid$(txt, i, 1))
+                        Select Case tb((i - 1) * 2) + tb((i - 1) * 2 + 1) * 256&
                             Case 34, 44, 13, 10
                                 Exit Do
                             Case Else
@@ -204,10 +209,16 @@ End Sub
 ' JSON string escaping for CSV-sourced values: quote, backslash, \t, and
 ' newlines normalized to \n (CRLF collapses to a single \n, matching the
 ' historical behavior). Remaining control characters are emitted as \uXXXX
-' so the output always survives a round trip through Json_Parse.
+' so the output always survives a round trip through Json_Parse. The scan
+' reads UTF-16 byte pairs from a one-time snapshot; only characters with a
+' zero high byte can need escaping.
 Private Sub Csv_AppendEscaped(ByRef sb As JsonTextBuilder, ByRef s As String)
     Dim L As Long
     L = Len(s)
+    If L = 0 Then Exit Sub
+
+    Dim b() As Byte
+    b = s
 
     Dim runStart As Long
     runStart = 1
@@ -216,35 +227,37 @@ Private Sub Csv_AppendEscaped(ByRef sb As JsonTextBuilder, ByRef s As String)
     i = 1
 
     Do While i <= L
-        Dim c As Long
-        c = AscW(Mid$(s, i, 1))
+        If b((i - 1) * 2 + 1) = 0 Then
+            Dim c As Long
+            c = b((i - 1) * 2)
 
-        Dim escText As String
-        escText = vbNullString
+            Dim escText As String
+            escText = vbNullString
 
-        Select Case c
-            Case 34: escText = "\"""
-            Case 92: escText = "\\"
-            Case 9:  escText = "\t"
-            Case 10: escText = "\n"
-            Case 13
-                escText = "\n"
-            Case 0 To 8, 11, 12, 14 To 31
-                escText = "\u" & Right$("0000" & Hex$(c), 4)
-        End Select
+            Select Case c
+                Case 34: escText = "\"""
+                Case 92: escText = "\\"
+                Case 9:  escText = "\t"
+                Case 10: escText = "\n"
+                Case 13
+                    escText = "\n"
+                Case 0 To 8, 11, 12, 14 To 31
+                    escText = "\u" & Right$("0000" & Hex$(c), 4)
+            End Select
 
-        If Len(escText) > 0 Then
-            If i > runStart Then
-                JsonSB_Append sb, Mid$(s, runStart, i - runStart)
+            If Len(escText) > 0 Then
+                If i > runStart Then
+                    JsonSB_Append sb, Mid$(s, runStart, i - runStart)
+                End If
+                JsonSB_Append sb, escText
+
+                ' CRLF collapses to one \n.
+                If c = 13 And i < L Then
+                    If b(i * 2) = 10 And b(i * 2 + 1) = 0 Then i = i + 1
+                End If
+
+                runStart = i + 1
             End If
-            JsonSB_Append sb, escText
-
-            ' CRLF collapses to one \n.
-            If c = 13 And i < L Then
-                If AscW(Mid$(s, i + 1, 1)) = 10 Then i = i + 1
-            End If
-
-            runStart = i + 1
         End If
 
         i = i + 1

@@ -571,40 +571,50 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Dim rowCount As Long
     rowCount = arr.count
 
-    ' Validate every element up-front so a mid-write failure cannot leave a
-    ' partially updated table. For Each throughout this function: indexed
-    ' arr(i) access walks the Collection's linked list per hit and turns
-    ' these row sweeps quadratic on large arrays.
-    Dim rowVar As Variant
-
-    Dim i As Long
-    i = 0
-
-    For Each rowVar In arr
-        i = i + 1
-
-        If (Not IsObject(rowVar)) _
-            Or (TypeName(rowVar) <> "Collection") _
-            Or (Not Json_IsObject(rowVar)) Then
-            Err.Raise vbObjectError + 1163, SRC, _
-                "Array element at index " & (i - 1) & " is not an object for root: " & tableRoot
-        End If
-    Next rowVar
-
-    ' Pass 1: headers, first-seen order across all rows.
+    ' SINGLE pass over the rows: validate each element, then fill its cells
+    ' into one 2D array while headers register on the fly (the array's
+    ' column dimension grows as new paths appear; see Json_RowObjectFillRow).
+    ' Nothing touches the sheet until the one upsert call at the end, so a
+    ' validation failure still leaves the table untouched - the same
+    ' guarantee the old validate-then-collect-then-fill triple sweep gave,
+    ' at a third of the traversal cost. For Each throughout: indexed arr(i)
+    ' access walks the Collection's linked list and is quadratic.
     Dim headerIdx As JsonStringIndex
     JsonIdx_Init headerIdx, 64
 
+    Dim data As Variant
+    Dim rowVar As Variant
     Dim rowObj As Collection
-    For Each rowVar In arr
-        Set rowObj = rowVar
-        Json_RowObjectCollectHeaders rowObj, vbNullString, nonTableArraysAsJson, headerIdx
-    Next rowVar
+    Dim rowIndex As Long
 
+    If rowCount > 0 Then
+        ReDim data(1 To rowCount, 1 To 8)   ' columns grow on demand
+
+        rowIndex = 0
+        For Each rowVar In arr
+            rowIndex = rowIndex + 1
+
+            If (Not IsObject(rowVar)) _
+                Or (TypeName(rowVar) <> "Collection") _
+                Or (Not Json_IsObject(rowVar)) Then
+                Err.Raise vbObjectError + 1163, SRC, _
+                    "Array element at index " & (rowIndex - 1) & " is not an object for root: " & tableRoot
+            End If
+
+            Set rowObj = rowVar
+            Json_RowObjectFillRow rowObj, vbNullString, nonTableArraysAsJson, headerIdx, data, rowIndex
+        Next rowVar
+    End If
+
+    ' Resolve the final schema and trim the array's spare column capacity.
     Dim headersOut As Variant
     If headerIdx.count = 0 Then
         ReDim headersOut(1 To 1) As Variant
         headersOut(1) = "value"
+
+        If rowCount > 0 Then
+            ReDim data(1 To rowCount, 1 To 1)   ' all Empty cells
+        End If
     Else
         ReDim headersOut(1 To headerIdx.count) As Variant
 
@@ -612,6 +622,12 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
         For hc = 1 To headerIdx.count
             headersOut(hc) = headerIdx.keys(hc)
         Next hc
+
+        If rowCount > 0 Then
+            If UBound(data, 2) > headerIdx.count Then
+                ReDim Preserve data(1 To rowCount, 1 To headerIdx.count)
+            End If
+        End If
     End If
 
     ' Empty result + removeMissingColumns: keep the existing schema and just
@@ -640,27 +656,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
         Exit Sub
     End If
 
-    ' Pass 2: fill ONE 2D array for the whole payload and run the upsert
-    ' pipeline ONCE (one schema resolution, one resize, one body write).
-    ' The old per-50k-cell chunk loop re-ran the full pipeline per chunk;
-    ' its repeated table resizes dominated large loads. Memory is not a
-    ' concern: the parsed Collection model already holds every value and is
-    ' far larger than this array.
-    Dim colCount As Long
-    colCount = UBound(headersOut) - LBound(headersOut) + 1
-
-    Dim data As Variant
-    ReDim data(1 To rowCount, 1 To colCount)
-
-    Dim rowIndex As Long
-    rowIndex = 0
-
-    For Each rowVar In arr
-        rowIndex = rowIndex + 1
-        Set rowObj = rowVar
-        Json_RowObjectFillRow rowObj, vbNullString, nonTableArraysAsJson, headerIdx, data, rowIndex
-    Next rowVar
-
+    ' One pipeline pass: one schema resolution, one resize, one body write.
     Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
         headersOut, data, _
         clearExisting, addMissingColumns, removeMissingColumns, _
