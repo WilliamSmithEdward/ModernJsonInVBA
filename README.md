@@ -39,8 +39,9 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
 
 ## Introduction
 
-**ModernJsonInVBA** is a single-module JSON engine for structured Excel
-workflows.
+**ModernJsonInVBA** is a pure-VBA JSON engine for structured Excel
+workflows, organized as a small set of focused modules (parser,
+serializer, transforms, tables, CSV/XML conversion, Excel integration).
 
 It materializes JSON text into Excel tables (ListObjects) with
 predictable, repeatable behavior.
@@ -146,26 +147,35 @@ Excel ListObject Upsert
 
 ModernJsonInVBA supports two usage models:
 
--   Copy the module into your own workbook (recommended)
+-   Import the modules into your own workbook (recommended)
 -   Use the provided `.xlsm` file directly
 
-### Option 1 — Copy Into Your Workbook
+### Option 1 — Import Into Your Workbook
 
-1.  Download `ModernJsonInVBA.vba`
-2.  Open the file in a text editor
-3.  Select all → Copy
+1.  Download the `.bas` files from the `vba_source/` folder
+2.  Open your Excel workbook
+3.  Press `ALT + F11`
+4.  File → Import File… and import **all eleven** modules
+5.  Save as `.xlsm`
 
-Then:
+The library is split by concern; all eleven modules are required:
 
-4.  Open your Excel workbook
-5.  Press `ALT + F11`
-6.  Insert → Module
-7.  Paste the code
-8.  Save as `.xlsm`
+| Module              | Responsibility                                    |
+|---------------------|---------------------------------------------------|
+| `Json_Common`       | Shared plumbing: tag constant, path utilities, hash index, string builder |
+| `Json_Parser`       | JSON text → in-memory model (`Json_Parse`)        |
+| `Json_Serializer`   | Model → JSON text (`Json_Stringify`)              |
+| `Json_Model`        | Type checks, object get/set, path resolution      |
+| `Json_Transforms`   | Flatten / unflatten / array-root discovery        |
+| `Json_Tables`       | Table extraction, 2D conversion                   |
+| `Json_Coalesce`     | Merging JSON arrays (child hoisting, concatenation) |
+| `Json_Csv`          | CSV → JSON conversion                             |
+| `Json_Xml`          | XML → JSON conversion                             |
+| `Json_Excel`        | ListObject ingestion (upsert pipeline)            |
+| `Json_Excel_Export` | ListObject / range → JSON export                  |
 
-Module name:
-
-    zz_ModernJsonInVba
+The public API (every function documented below) is unchanged from the
+earlier single-module releases — existing code keeps working as-is.
 
 ------------------------------------------------------------------------
 
@@ -175,7 +185,7 @@ Module name:
 2.  Open the file
 3.  Enable macros
 
-You may copy the module into another workbook if needed.
+You may export/import the modules into another workbook if needed.
 
 ------------------------------------------------------------------------
 
