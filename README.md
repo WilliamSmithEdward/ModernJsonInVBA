@@ -22,8 +22,8 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
   - [Core JSON engine](#core-json-engine)
   - [Reproducing these numbers](#reproducing-these-numbers)
 - [Installation](#installation)
-  - [Option 1 — Import Into Your Workbook](#option-1--import-into-your-workbook)
-  - [Option 2 — Use the Provided Workbook](#option-2--use-the-provided-workbook)
+  - [Option 1: Import Into Your Workbook](#option-1-import-into-your-workbook)
+  - [Option 2: Use the Provided Workbook](#option-2-use-the-provided-workbook)
 - [Requirements](#requirements)
 - [Basic API Example](#basic-api-example)
   - [Refresh Mode](#refresh-mode)
@@ -104,17 +104,15 @@ No fallback tables.
 -   Upsert Excel ListObjects deterministically
 -   Enforce strict schema contracts when required
 -   Round trip json → list object → json
--   Emoji-Ready: Full support for non-BMP Unicode characters via surrogate pair parsing.
--   Memory Efficient: Linear-time string processing designed for high-volume data.
--   State-Machine Parsing: Handles nested arrays and objects to any depth without breaking.
+-   Full non-BMP Unicode support via surrogate-pair parsing
+-   Linear-time string processing for high-volume data
+-   Handles arrays and objects nested to any depth
 
 All implemented in pure VBA.
 
 -   No `Scripting.Dictionary`
 -   No COM references
 -   No external libraries
-
-Zero Dependencies: No need for Scripting.Dictionary or external DLLs. It’s pure, portable VBA.
 
 <pre>
 JSON Text
@@ -134,7 +132,7 @@ Excel ListObject Upsert
 ## Performance
 
 All figures below come from the reproducible benchmark suite in
-[`json_payloads/`](json_payloads) — seven deterministic, generated payloads
+[`json_payloads/`](json_payloads): seven deterministic, generated payloads
 totalling ~200 MB, driven by the `Run_JsonPerfSuite` macro in the workbook.
 
 **Benchmark environment**
@@ -143,7 +141,7 @@ totalling ~200 MB, driven by the `Run_JsonPerfSuite` macro in the workbook.
 - Excel 16.0, 64-bit VBA
 - Payloads read from local disk; times are wall-clock via `Timer`
 
-Everything is pure VBA — no `Scripting.Dictionary`, no COM references, no
+Everything is pure VBA: no `Scripting.Dictionary`, no COM references, no
 external libraries.
 
 ### Loading JSON into Excel tables
@@ -153,23 +151,23 @@ ListObject (`Excel_UpsertListObjectFromJsonAtRoot`). The **Create** column
 is the one-shot load of a fresh table; **Refresh** re-loads the same table
 in place (clear + rewrite). Rows/sec and cells/sec are for Create.
 
-| Payload | Rows × Cols | File | Create | Refresh | Rows/sec | Cells/sec |
+| Payload | Rows x Cols | File | Create | Refresh | Rows/sec | Cells/sec |
 |---|---|---:|---:|---:|---:|---:|
-| Flat, small | 10,000 × 10 | 2.1 MB | 0.44 s | 0.50 s | 22,700 | 227,000 |
-| Flat, medium | 100,000 × 10 | 21.6 MB | 4.53 s | 5.06 s | 22,100 | 221,000 |
-| **Flat, large** | **500,000 × 10** | **109.5 MB** | **23.5 s** | **26.1 s** | **21,200** | **212,000** |
-| Numeric-heavy | 200,000 × 8 | 25.9 MB | 6.57 s | 7.59 s | 30,500 | 244,000 |
-| Escape-dense | 50,000 × 6 | 14.8 MB | 2.43 s | 2.53 s | 20,600 | 124,000 |
-| Nested objects | 50,000 × 9 | 9.2 MB | 2.92 s | 3.00 s | 17,100 | 154,000 |
-| Wide schema | 5,000 × 200 | 16.0 MB | 4.04 s | 4.67 s | 1,240 | 248,000 |
+| Flat, small | 10,000 x 10 | 2.1 MB | 0.44 s | 0.50 s | 22,700 | 227,000 |
+| Flat, medium | 100,000 x 10 | 21.6 MB | 4.53 s | 5.06 s | 22,100 | 221,000 |
+| **Flat, large** | **500,000 x 10** | **109.5 MB** | **23.5 s** | **26.1 s** | **21,200** | **212,000** |
+| Numeric-heavy | 200,000 x 8 | 25.9 MB | 6.57 s | 7.59 s | 30,500 | 244,000 |
+| Escape-dense | 50,000 x 6 | 14.8 MB | 2.43 s | 2.53 s | 20,600 | 124,000 |
+| Nested objects | 50,000 x 9 | 9.2 MB | 2.92 s | 3.00 s | 17,100 | 154,000 |
+| Wide schema | 5,000 x 200 | 16.0 MB | 4.04 s | 4.67 s | 1,240 | 248,000 |
 
 > A **half-million-row, 110 MB** JSON document becomes a fully materialized
-> Excel table in **~24 seconds** — the whole document is written to the
+> Excel table in **~24 seconds**. The whole document is written to the
 > sheet in a single block, with no chunking.
 
-Cell throughput holds around **210,000–250,000 cells/sec** regardless of row
+Cell throughput holds around **210,000 to 250,000 cells/sec** regardless of row
 count; it dips only when a column is unusually escape-heavy (the escape
-payload is deliberately hostile — every string carries quotes, backslashes,
+payload is deliberately hostile: every string carries quotes, backslashes,
 newlines, and emoji). Nested payloads reconstruct dotted column paths
 (`customer.address.city`) and still clear 150,000 cells/sec.
 
@@ -180,9 +178,9 @@ payloads:
 
 | Operation | Throughput | Notes |
 |---|---|---|
-| `Json_Parse` → model | 6–11 MB/s | full recursive-descent parse into the tagged-Collection model |
-| `Json_Stringify` ← model | 5–9 MB/s | model back to compact JSON text |
-| `Excel_ListObjectToJson` | 3–13 MB/s | table → JSON array-of-objects |
+| `Json_Parse` → model | 6-11 MB/s | full recursive-descent parse into the tagged-Collection model |
+| `Json_Stringify` ← model | 5-9 MB/s | model back to compact JSON text |
+| `Excel_ListObjectToJson` | 3-13 MB/s | table → JSON array-of-objects |
 
 For example, `Json_Parse` turns the 21.6 MB / 100,000-row document into the
 in-memory model in **2.4 s**, and `Json_Stringify` serializes it back in
@@ -209,12 +207,12 @@ ModernJsonInVBA supports two usage models:
 -   Import the modules into your own workbook (recommended)
 -   Use the provided `.xlsm` file directly
 
-### Option 1 — Import Into Your Workbook
+### Option 1: Import Into Your Workbook
 
 1.  Download the `.bas` files from the `vba_source/` folder
 2.  Open your Excel workbook
 3.  Press `ALT + F11`
-4.  File → Import File… and import **all eleven** modules
+4.  File → Import File... and import **all eleven** modules
 5.  Save as `.xlsm`
 
 The library is split by concern; all eleven modules are required:
@@ -234,11 +232,11 @@ The library is split by concern; all eleven modules are required:
 | `Json_Excel_Export` | ListObject / range → JSON export                  |
 
 The public API (every function documented below) is unchanged from the
-earlier single-module releases — existing code keeps working as-is.
+earlier single-module releases, so existing code keeps working as-is.
 
 ------------------------------------------------------------------------
 
-### Option 2 — Use the Provided Workbook
+### Option 2: Use the Provided Workbook
 
 1.  Download `ModernJsonInVBA.xlsm`
 2.  Open the file
@@ -453,7 +451,7 @@ End Function
 Public Sub Example_ReadValuesFromJson()
 
     ' ------------------------------------------------------------
-    ' Step 1 — Create some example JSON
+    ' Step 1: Create some example JSON
     ' (Normally this would come from an API response)
     ' ------------------------------------------------------------
     
@@ -490,7 +488,7 @@ Public Sub Example_ReadValuesFromJson()
     
     
     ' ------------------------------------------------------------
-    ' Step 2 — Parse the JSON text
+    ' Step 2: Parse the JSON text
     '
     ' Json_ParseInto converts the JSON string into an in-memory
     ' structure that VBA can navigate.
@@ -501,7 +499,7 @@ Public Sub Example_ReadValuesFromJson()
     
     
     ' ------------------------------------------------------------
-    ' Step 3 — Access a value using a JSON path
+    ' Step 3: Access a value using a JSON path
     '
     ' "$.orders[0].orderId"
     ' means:
@@ -520,7 +518,7 @@ Public Sub Example_ReadValuesFromJson()
     
     
     ' ------------------------------------------------------------
-    ' Step 4 — Access nested values
+    ' Step 4: Access nested values
     ' ------------------------------------------------------------
     
     Dim custName As Variant
@@ -531,7 +529,7 @@ Public Sub Example_ReadValuesFromJson()
     
     
     ' ------------------------------------------------------------
-    ' Step 5 — Extract the orders array
+    ' Step 5: Extract the orders array
     '
     ' Arrays are represented as VBA Collections
     ' ------------------------------------------------------------
@@ -545,7 +543,7 @@ Public Sub Example_ReadValuesFromJson()
     
     
     ' ------------------------------------------------------------
-    ' Step 6 — Loop through each order
+    ' Step 6: Loop through each order
     ' ------------------------------------------------------------
     
     Dim orderObj As Collection
@@ -559,7 +557,7 @@ Public Sub Example_ReadValuesFromJson()
         
         
         ' --------------------------------------------------------
-        ' Step 7 — Access the items array inside each order
+        ' Step 7: Access the items array inside each order
         ' --------------------------------------------------------
         
         Dim itemsV As Variant
@@ -580,7 +578,7 @@ Public Sub Example_ReadValuesFromJson()
                 
                 
                 ' ------------------------------------------------
-                ' Step 8 — Access the promo codes array
+                ' Step 8: Access the promo codes array
                 ' ------------------------------------------------
                 
                 Dim promosV As Variant
@@ -612,9 +610,8 @@ End Sub
 
 ## Excel to JSON (Reverse Materialization)
 
-ModernJsonInVBA is not only JSON to Excel.
-
-It also supports deterministic **Excel Table to JSON** conversion.
+ModernJsonInVBA also runs in reverse: deterministic **Excel Table to JSON**
+conversion.
 
 This enables:
 
@@ -689,7 +686,7 @@ Excel Table
 JSON Text
 ```
 
-Excel becomes a structured JSON surface, not just a spreadsheet.
+Excel becomes a structured JSON surface with full round-trip support.
 
 ## Understanding `tableRoot`
 
@@ -769,7 +766,7 @@ Errors protect against:
 ### JSON Parse / Serialize
 
 - `Public Function Json_Parse(ByVal jsonText As String) As Variant`  
-  Parses JSON text into the module’s in-memory model. Returns a tagged `Collection` for objects, an untagged `Collection` for arrays, or a primitive `Variant` for scalar values.
+  Parses JSON text into the library's in-memory model. Returns a tagged `Collection` for objects, an untagged `Collection` for arrays, or a primitive `Variant` for scalar values.
 
 - `Public Sub Json_ParseInto(ByVal jsonText As String, ByRef outValue As Variant)`  
   Parses JSON text into an output `Variant` passed by reference.
@@ -780,10 +777,10 @@ Errors protect against:
 ## JSON Type / Object Helpers
 
 - `Public Function Json_IsObject(ByVal v As Variant) As Boolean`  
-  Returns `True` when `v` is a tagged JSON object in this library’s model.
+  Returns `True` when `v` is a tagged JSON object in this library's model.
 
 - `Public Function Json_IsArray(ByVal v As Variant) As Boolean`  
-  Returns `True` when `v` is an untagged JSON array in this library’s model.
+  Returns `True` when `v` is an untagged JSON array in this library's model.
 
 - `Public Sub Json_ObjSet(ByVal obj As Collection, ByVal key As String, ByVal value As Variant)`  
   Sets or overwrites a property on a tagged JSON object while preserving deterministic order.
@@ -857,13 +854,13 @@ Errors protect against:
   Reads a CSV file from disk and converts it into a JSON array-of-objects.
 
 - `Public Function CsvTextToJson(ByVal txt As String) As String`  
-  Converts raw CSV text into a JSON array-of-objects using the module’s built-in CSV parser.
+  Converts raw CSV text into a JSON array-of-objects using the library's built-in CSV parser.
 
 - `Public Function XmlFileToJson(ByVal filePath As String) As String`  
   Reads an XML file from disk and converts it into JSON.
 
 - `Public Function XmlTextToJson(ByVal txt As String) As String`  
-  Converts raw XML text into JSON using the module’s lightweight pure-VBA XML parser.
+  Converts raw XML text into JSON using the library's lightweight pure-VBA XML parser.
 
 ### JSON Coalescing Utilities
 

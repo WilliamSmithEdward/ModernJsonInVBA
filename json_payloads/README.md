@@ -4,12 +4,12 @@ Large deterministic JSON payloads plus a workbook performance harness.
 
 ## Files
 
-- `generate_payloads.py` — regenerates every payload (seeded RNG, pure
+- `generate_payloads.py`: regenerates every payload (seeded RNG, pure
   ASCII output so VBA's ANSI file read is lossless; unicode content is
   carried as `\uXXXX` escapes and exercises the parser's escape decoding).
-- `Performance_Payloads_.bas` — the harness module (also imported in
+- `Performance_Payloads_.bas`: the harness module (also imported in
   `ModernJsonInVBA.xlsm`).
-- `tbl_*.json` — the payloads (generated, not committed):
+- `tbl_*.json`: the payloads (generated, not committed):
 
 | Payload | Rows | Shape |
 |---|---:|---|
@@ -32,7 +32,7 @@ Large deterministic JSON payloads plus a workbook performance harness.
    Run_JsonPerfSuite
    ```
 
-A markdown report prints to the Immediate window — paste it directly into a
+A markdown report prints to the Immediate window; paste it directly into a
 GitHub issue or commit message. Each payload reports file read, `Json_Parse`
 (model), `Json_Stringify`, table upsert create/refresh
 (`Excel_UpsertListObjectFromJsonAtRoot`), and `Excel_ListObjectToJson`
