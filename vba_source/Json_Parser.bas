@@ -40,11 +40,13 @@ Private Const ERR_SRC As String = "ModernJsonInVBA"
 
 ' Reader state: 1-based cursor over the input text. bytes holds the same
 ' text as UTF-16 code units (little-endian byte pairs) so scanning loops can
-' read character codes without allocating.
+' read character codes without allocating. textLen caches Len(text), which
+' the scanning loops consult constantly.
 Private Type JsonReader
     text As String
     bytes() As Byte
     pos As Long
+    textLen As Long
 End Type
 
 ' =============================================================================
@@ -100,20 +102,21 @@ End Sub
 Private Sub JR_Init(ByRef r As JsonReader, ByVal jsonText As String)
     r.text = jsonText
     r.pos = 1
-    If Len(jsonText) > 0 Then
+    r.textLen = Len(jsonText)
+    If r.textLen > 0 Then
         r.bytes = jsonText
     End If
 End Sub
 
 Private Function JR_Eof(ByRef r As JsonReader) As Boolean
-    JR_Eof = (r.pos > Len(r.text))
+    JR_Eof = (r.pos > r.textLen)
 End Function
 
 ' Character code (0..65535) at the cursor, or -1 at end of input. Unlike
 ' AscW this never goes negative for high code points, so range checks are
 ' straightforward.
 Private Function JR_CodeAt(ByRef r As JsonReader) As Long
-    If r.pos > Len(r.text) Then
+    If r.pos > r.textLen Then
         JR_CodeAt = -1
     Else
         Dim off As Long
@@ -124,7 +127,7 @@ End Function
 
 Private Sub JR_SkipWs(ByRef r As JsonReader)
     Dim L As Long
-    L = Len(r.text)
+    L = r.textLen
 
     Do While r.pos <= L
         Dim off As Long
@@ -148,7 +151,7 @@ Private Sub JR_ExpectChar(ByRef r As JsonReader, ByVal expectedCode As Long, ByR
     End If
 
     Dim ch As String
-    If r.pos <= Len(r.text) Then
+    If r.pos <= r.textLen Then
         ch = Mid$(r.text, r.pos, 1)
         r.pos = r.pos + 1
     Else
@@ -208,7 +211,7 @@ Private Sub Json_ReadValue(ByRef r As JsonReader, ByRef outValue As Variant)
 
         Case Else
             Dim ch As String
-            If r.pos <= Len(r.text) Then ch = Mid$(r.text, r.pos, 1) Else ch = vbNullString
+            If r.pos <= r.textLen Then ch = Mid$(r.text, r.pos, 1) Else ch = vbNullString
             Err.Raise vbObjectError + 701, ERR_SRC, _
                 "Unexpected token '" & ch & "' at pos " & r.pos
     End Select
@@ -481,7 +484,7 @@ End Function
 
 ' Reads exactly four hex digits and returns their value (0..65535).
 Private Function JR_ReadHex4(ByRef r As JsonReader) As Long
-    If r.pos + 3 > Len(r.text) Then
+    If r.pos + 3 > r.textLen Then
         Err.Raise vbObjectError + 524, ERR_SRC, "Incomplete \uXXXX escape"
     End If
 
@@ -773,7 +776,7 @@ End Sub
 ' and JR_GrowRows guards the fill regardless.
 Private Function JR_CountTopLevelElements(ByRef r As JsonReader) As Long
     Dim L As Long
-    L = Len(r.text)
+    L = r.textLen
 
     Dim depth As Long
     Dim count As Long

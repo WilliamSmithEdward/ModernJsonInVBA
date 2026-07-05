@@ -31,6 +31,7 @@ Public Const JSON_TAG_OBJECT As String = "__OBJ__"
 Public Type JsonTextBuilder
     buffer As String
     used As Long
+    capacity As Long     ' cached Len(buffer); avoids a Len() call per append
 End Type
 
 ' JsonStringIndex: open-addressing hash index over strings.
@@ -62,6 +63,7 @@ Public Sub JsonSB_Init(ByRef sb As JsonTextBuilder, Optional ByVal initialCapaci
     If initialCapacity < 16 Then initialCapacity = 16
     sb.buffer = Space$(initialCapacity)
     sb.used = 0
+    sb.capacity = initialCapacity
 End Sub
 
 Public Sub JsonSB_Append(ByRef sb As JsonTextBuilder, ByRef s As String)
@@ -69,20 +71,22 @@ Public Sub JsonSB_Append(ByRef sb As JsonTextBuilder, ByRef s As String)
     addLen = Len(s)
     If addLen = 0 Then Exit Sub
 
-    Dim capNow As Long
-    capNow = Len(sb.buffer)
+    ' Grow only when needed; the cached capacity avoids Len(sb.buffer) on the
+    ' common (no-grow) path, which is the library's single hottest operation.
+    If sb.used + addLen > sb.capacity Then
+        Dim capNew As Long
+        capNew = sb.capacity
+        If capNew < 16 Then capNew = 16
+        Do While sb.used + addLen > capNew
+            capNew = capNew * 2
+        Loop
 
-    If capNow = 0 Then
-        capNow = 256
-        Do While capNow < addLen
-            capNow = capNow * 2
-        Loop
-        sb.buffer = Space$(capNow)
-    ElseIf sb.used + addLen > capNow Then
-        Do While sb.used + addLen > capNow
-            capNow = capNow * 2
-        Loop
-        sb.buffer = sb.buffer & Space$(capNow - Len(sb.buffer))
+        If sb.capacity = 0 Then
+            sb.buffer = Space$(capNew)
+        Else
+            sb.buffer = sb.buffer & Space$(capNew - sb.capacity)
+        End If
+        sb.capacity = capNew
     End If
 
     Mid$(sb.buffer, sb.used + 1, addLen) = s

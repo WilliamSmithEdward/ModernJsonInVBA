@@ -36,6 +36,15 @@ Option Explicit
 
 Private Const ERR_SRC As String = "ModernJsonInVBA"
 
+' Locale decimal separator, discovered once by Json_NumberToString.
+Private mDecSep As String
+Private mDecSepKnown As Boolean
+
+' The two-character sequence  comma + double-quote  ( ," ), used to open a
+' non-first object member in a single append. Named because the doubled-
+' quote literal is otherwise easy to miscount.
+Private Const SEP_AND_QUOTE As String = ","""
+
 ' =============================================================================
 ' Public API
 ' =============================================================================
@@ -62,62 +71,86 @@ End Sub
 ' Writer internals
 ' =============================================================================
 
+' One VarType dispatch replaces the former ladder of IsArray / IsObject /
+' IsNull / VarType / IsNumeric checks (up to six type inspections per value).
+' The common cases - string, integer, real, boolean, null, object - hit a
+' direct Case; anything unusual falls to Case Else, which reproduces the old
+' IsArray -> IsNumeric -> quoted-string logic exactly (so Date, Currency,
+' LongLong, Empty, etc. serialize identically to before).
 Private Sub JsonW_WriteValue(ByRef sb As JsonTextBuilder, ByRef v As Variant)
 
-    ' Guard: this library's JSON arrays are Collections, not VBA arrays.
-    If IsArray(v) Then
-        Err.Raise vbObjectError + 1137, "Json_Stringify", _
-            "VBA array encountered. This JSON engine represents arrays as Collection, not Variant(). " & _
-            "You likely passed Range.Value2 or a key/value pair array as a top-level value."
-    End If
+    Select Case VarType(v)
 
-    If IsObject(v) Then
+        Case vbString
+            JsonSB_Append sb, """"
+            JsonW_WriteEscaped sb, CStr(v)
+            JsonSB_Append sb, """"
 
-        If Json_IsObject(v) Then
-            JsonW_WriteObject sb, v
-            Exit Sub
-        End If
+        Case vbLong, vbInteger, vbByte
+            ' Integers never carry a decimal separator: skip CDbl and the
+            ' locale-fixup entirely.
+            JsonSB_Append sb, CStr(v)
 
-        If TypeName(v) = "Collection" Then
-            Dim c As Collection
-            Set c = v
+        Case vbDouble, vbSingle
+            JsonSB_Append sb, Json_NumberToString(CDbl(v))
 
-            If Json_CollectionLooksLikeObject(c) Then
-                Err.Raise vbObjectError + 1134, "Json_Stringify", _
-                    "Collection appears to be an object but is not tagged with TAG_OBJECT."
+        Case vbBoolean
+            If v Then
+                JsonSB_Append sb, "true"
+            Else
+                JsonSB_Append sb, "false"
             End If
 
-            JsonW_WriteArray sb, c
-            Exit Sub
-        End If
+        Case vbNull
+            JsonSB_Append sb, "null"
 
-        ' Non-Collection object: serialize its type name as a string.
-        JsonSB_Append sb, """"
-        JsonW_WriteEscaped sb, TypeName(v)
-        JsonSB_Append sb, """"
+        Case vbObject, vbDataObject
+            JsonW_WriteObjectOrArray sb, v
+
+        Case Else
+            ' Arrays, then any other numeric type, then everything else as a
+            ' quoted string - identical to the pre-dispatch fallthrough.
+            If IsArray(v) Then
+                Err.Raise vbObjectError + 1137, "Json_Stringify", _
+                    "VBA array encountered. This JSON engine represents arrays as Collection, not Variant(). " & _
+                    "You likely passed Range.Value2 or a key/value pair array as a top-level value."
+            ElseIf IsNumeric(v) Then
+                JsonSB_Append sb, Json_NumberToString(CDbl(v))
+            Else
+                JsonSB_Append sb, """"
+                JsonW_WriteEscaped sb, CStr(v)
+                JsonSB_Append sb, """"
+            End If
+
+    End Select
+
+End Sub
+
+' Object-valued dispatch (v is known to be an object): tagged object, untagged
+' array Collection, or a non-Collection object serialized as its type name.
+Private Sub JsonW_WriteObjectOrArray(ByRef sb As JsonTextBuilder, ByRef v As Variant)
+    If Json_IsObject(v) Then
+        JsonW_WriteObject sb, v
         Exit Sub
     End If
 
-    If IsNull(v) Then
-        JsonSB_Append sb, "null"
-    ElseIf VarType(v) = vbBoolean Then
-        If v Then
-            JsonSB_Append sb, "true"
-        Else
-            JsonSB_Append sb, "false"
+    If TypeName(v) = "Collection" Then
+        Dim c As Collection
+        Set c = v
+
+        If Json_CollectionLooksLikeObject(c) Then
+            Err.Raise vbObjectError + 1134, "Json_Stringify", _
+                "Collection appears to be an object but is not tagged with TAG_OBJECT."
         End If
-    ElseIf VarType(v) = vbString Then
-        JsonSB_Append sb, """"
-        JsonW_WriteEscaped sb, CStr(v)
-        JsonSB_Append sb, """"
-    ElseIf IsNumeric(v) Then
-        JsonSB_Append sb, Json_NumberToString(CDbl(v))
-    Else
-        JsonSB_Append sb, """"
-        JsonW_WriteEscaped sb, CStr(v)
-        JsonSB_Append sb, """"
+
+        JsonW_WriteArray sb, c
+        Exit Sub
     End If
 
+    ' Non-Collection object: serialize its type name as a string.
+    JsonSB_Append sb, """"
+    JsonW_WriteEscaped sb, TypeName(v)
+    JsonSB_Append sb, """"
 End Sub
 
 Private Sub JsonW_WriteArray(ByRef sb As JsonTextBuilder, ByVal c As Collection)
@@ -237,10 +270,15 @@ Private Sub JsonW_WriteObject(ByRef sb As JsonTextBuilder, ByVal obj As Collecti
             End If
 
             If haveMember Then
-                If Not first Then JsonSB_Append sb, ","
-                first = False
+                ' Merge the member separator with the key's opening quote:
+                ' one append instead of two for every member after the first.
+                If first Then
+                    JsonSB_Append sb, """"
+                    first = False
+                Else
+                    JsonSB_Append sb, SEP_AND_QUOTE
+                End If
 
-                JsonSB_Append sb, """"
                 JsonW_WriteEscaped sb, keyStr
                 JsonSB_Append sb, """:"
                 JsonW_WriteValue sb, val
@@ -362,13 +400,17 @@ End Sub
 
 ' Culture-invariant number formatting: CStr uses the locale decimal
 ' separator, which JSON does not allow, so a non-dot separator is replaced.
+' The separator is discovered once and cached - the former per-call
+' CStr(1.1) probe dominated number-heavy serialization.
 Private Function Json_NumberToString(ByVal d As Double) As String
     Dim s As String
     s = CStr(d)
 
-    Dim decSep As String
-    decSep = Mid$(CStr(1.1), 2, 1)
+    If Not mDecSepKnown Then
+        mDecSep = Mid$(CStr(1.1), 2, 1)
+        mDecSepKnown = True
+    End If
 
-    If decSep <> "." Then s = Replace$(s, decSep, ".")
+    If mDecSep <> "." Then s = Replace$(s, mDecSep, ".")
     Json_NumberToString = s
 End Function
