@@ -384,12 +384,10 @@ Private Sub Json_FlattenInto( _
 End Sub
 
 Private Sub AddFlat(ByVal flat As Collection, ByVal key As String, ByVal value As Variant)
-    Dim vv As Variant
-    Json_VarAssign vv, value
-
     ' Array(...) allocates a fresh pair per call; a reused local array would
-    ' alias every pair to the same data.
-    flat.Add Array(key, vv)
+    ' alias every pair to the same data. Array() copies its Variant
+    ' arguments itself, object references included.
+    flat.Add Array(key, value)
 End Sub
 
 ' =============================================================================

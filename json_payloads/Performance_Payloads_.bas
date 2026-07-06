@@ -75,8 +75,8 @@ Public Function JsonPerfReport(Optional ByVal folderPath As String = vbNullStrin
         Exit Function
     End If
 
-    ' Stable report order.
-    PP_SortNames files, fileCount
+    ' Stable report order: smallest payload first.
+    PP_SortBySize folderPath, files, fileCount
 
     ' ---- suite-level application state ----
     Dim calcOld As XlCalculation
@@ -263,22 +263,280 @@ Private Sub PP_Append(ByRef md As JsonTextBuilder, ByVal line As String)
     JsonSB_Append md, vbCrLf
 End Sub
 
-' Insertion sort (file lists are tiny).
-Private Sub PP_SortNames(ByRef names() As String, ByVal count As Long)
+' Insertion sort by file size, ascending (file lists are tiny). Smallest
+' payload first gives the report a readable small-to-large progression.
+Private Sub PP_SortBySize(ByVal folderPath As String, ByRef names() As String, ByVal count As Long)
+    Dim sizes() As Double
+    ReDim sizes(1 To count)
+
     Dim i As Long
-    Dim j As Long
+    For i = 1 To count
+        sizes(i) = FileLen(folderPath & Application.PathSeparator & names(i))
+    Next i
 
     For i = 2 To count
-        Dim current As String
-        current = names(i)
+        Dim curName As String
+        Dim curSize As Double
+        curName = names(i)
+        curSize = sizes(i)
 
+        Dim j As Long
         j = i - 1
         Do While j >= 1
-            If StrComp(names(j), current, vbTextCompare) <= 0 Then Exit Do
+            If sizes(j) <= curSize Then Exit Do
             names(j + 1) = names(j)
+            sizes(j + 1) = sizes(j)
             j = j - 1
         Loop
 
-        names(j + 1) = current
+        names(j + 1) = curName
+        sizes(j + 1) = curSize
     Next i
 End Sub
+
+' =============================================================================
+' Pivoted matrix report: rows = pipeline step, columns = payload file,
+' values = seconds (0.0000). Complements Run_JsonPerfSuite's per-payload view.
+'
+' Usage:
+'   Run_JsonPerfMatrix                    ' all payloads, default folder
+'   Run_JsonPerfMatrix "C:\other\folder"  ' explicit folder
+' =============================================================================
+
+Public Sub Run_JsonPerfMatrix(Optional ByVal folderPath As String = vbNullString)
+    Debug.Print JsonPerfMatrix(folderPath)
+End Sub
+
+Public Function JsonPerfMatrix(Optional ByVal folderPath As String = vbNullString) As String
+    If Len(folderPath) = 0 Then
+        folderPath = ThisWorkbook.path & Application.PathSeparator & "json_payloads"
+    End If
+
+    ' ---- discover + sort payloads ----
+    Dim files() As String
+    Dim fileCount As Long
+    fileCount = 0
+
+    Dim f As String
+    f = Dir(folderPath & Application.PathSeparator & "*.json")
+    Do While Len(f) > 0
+        fileCount = fileCount + 1
+        If fileCount = 1 Then
+            ReDim files(1 To 16) As String
+        ElseIf fileCount > UBound(files) Then
+            ReDim Preserve files(1 To UBound(files) * 2) As String
+        End If
+        files(fileCount) = f
+        f = Dir
+    Loop
+
+    Dim md As JsonTextBuilder
+    JsonSB_Init md, 8192
+
+    If fileCount = 0 Then
+        PP_Append md, "**No .json payloads found.** Run json_payloads\generate_payloads.py first."
+        JsonPerfMatrix = JsonSB_Text(md)
+        Exit Function
+    End If
+
+    PP_SortBySize folderPath, files, fileCount
+
+    Const STEP_COUNT As Long = 6
+    Dim stepNames(1 To STEP_COUNT) As String
+    stepNames(1) = "Read file"
+    stepNames(2) = "Json_Parse (JSON to model)"
+    stepNames(3) = "Json_Stringify (model to JSON)"
+    stepNames(4) = "Upsert create (JSON to ListObject)"
+    stepNames(5) = "Upsert refresh"
+    stepNames(6) = "Export (ListObject to JSON)"
+
+    Dim secs() As Double
+    ReDim secs(1 To STEP_COUNT, 1 To fileCount)
+
+    Dim labels() As String
+    Dim mb() As Double
+    Dim rowsN() As Long
+    Dim colsN() As Long
+    ReDim labels(1 To fileCount)
+    ReDim mb(1 To fileCount)
+    ReDim rowsN(1 To fileCount)
+    ReDim colsN(1 To fileCount)
+
+    ' ---- suspend app state (restored even on error) ----
+    Dim calcOld As XlCalculation
+    Dim eventsOld As Boolean
+    Dim updatingOld As Boolean
+    calcOld = Application.Calculation
+    eventsOld = Application.EnableEvents
+    updatingOld = Application.ScreenUpdating
+
+    On Error GoTo Restore
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    Dim i As Long
+    For i = 1 To fileCount
+        labels(i) = PP_ShortLabel(files(i))
+        PP_MeasureFile folderPath & Application.PathSeparator & files(i), files(i), _
+            secs, i, mb(i), rowsN(i), colsN(i)
+    Next i
+
+    Application.Calculation = calcOld
+    Application.EnableEvents = eventsOld
+    Application.ScreenUpdating = updatingOld
+    On Error GoTo 0
+
+    ' ---- header / environment ----
+    PP_Append md, "# ModernJsonInVBA Performance"
+    PP_Append md, ""
+    PP_Append md, "Real-world timings across the JSON parser and Excel ListObject surface."
+    PP_Append md, "Regenerate with `Run_JsonPerfMatrix` (json_payloads/Performance_Payloads_.bas)."
+    PP_Append md, ""
+    PP_Append md, "- Generated: " & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+
+    #If Win64 Then
+        PP_Append md, "- Excel " & Application.Version & " (64-bit VBA)"
+    #Else
+        PP_Append md, "- Excel " & Application.Version & " (32-bit VBA)"
+    #End If
+
+    PP_Append md, "- Each cell is one wall-clock run (`Timer`); payloads are deterministic (seeded)."
+    PP_Append md, ""
+
+    ' ---- payload dimensions ----
+    PP_Append md, "## Payloads"
+    PP_Append md, ""
+    PP_Append md, "| Payload | Rows | Cols | Size (MB) |"
+    PP_Append md, "|---|---:|---:|---:|"
+    For i = 1 To fileCount
+        PP_Append md, "| " & labels(i) & " | " & Format$(rowsN(i), "#,##0") & " | " & _
+            colsN(i) & " | " & Format$(mb(i), "0.0") & " |"
+    Next i
+    PP_Append md, ""
+
+    ' ---- timings matrix (rows = step, columns = payload) ----
+    PP_Append md, "## Timings (seconds)"
+    PP_Append md, ""
+
+    Dim hdr As String
+    Dim sep As String
+    hdr = "| Step |"
+    sep = "|---|"
+    For i = 1 To fileCount
+        hdr = hdr & " " & labels(i) & " (" & Format$(mb(i), "0.0") & " MB) |"
+        sep = sep & "---:|"
+    Next i
+    PP_Append md, hdr
+    PP_Append md, sep
+
+    Dim s As Long
+    For s = 1 To STEP_COUNT
+        Dim line As String
+        line = "| " & stepNames(s) & " |"
+        For i = 1 To fileCount
+            line = line & " " & Format$(secs(s, i), "0.0000") & " |"
+        Next i
+        PP_Append md, line
+    Next s
+
+    JsonPerfMatrix = JsonSB_Text(md)
+    Exit Function
+
+Restore:
+    Application.Calculation = calcOld
+    Application.EnableEvents = eventsOld
+    Application.ScreenUpdating = updatingOld
+    Err.Raise Err.Number, Err.Source, Err.Description
+End Function
+
+' Time all six pipeline steps for one payload into column col of secs(),
+' and report the payload's row/column count and size. The scratch sheet is
+' always removed, even on error.
+Private Sub PP_MeasureFile( _
+    ByVal filePath As String, _
+    ByVal fileName As String, _
+    ByRef secs() As Double, _
+    ByVal col As Long, _
+    ByRef outMB As Double, _
+    ByRef outRows As Long, _
+    ByRef outCols As Long _
+)
+    outMB = FileLen(filePath) / 1048576#
+
+    Dim t0 As Double
+
+    ' 1) read
+    t0 = Timer
+    Dim h As Integer
+    h = FreeFile
+    Dim jsonText As String
+    Open filePath For Input As #h
+    jsonText = Input$(LOF(h), h)
+    Close #h
+    secs(1, col) = PP_Elapsed(t0)
+
+    ' 2) parse to model
+    t0 = Timer
+    Dim parsed As Variant
+    Json_ParseInto jsonText, parsed
+    secs(2, col) = PP_Elapsed(t0)
+
+    ' 3) stringify model back to JSON
+    t0 = Timer
+    Dim js As String
+    js = Json_Stringify(parsed)
+    secs(3, col) = PP_Elapsed(t0)
+    js = vbNullString
+    Set parsed = Nothing
+
+    Dim arraysAsJson As Boolean
+    arraysAsJson = (InStr(1, fileName, "nested", vbTextCompare) > 0)
+
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets.Add
+
+    On Error GoTo MFail
+
+    ' 4) upsert create
+    t0 = Timer
+    Excel_UpsertListObjectFromJsonAtRoot ws, "tPerf", ws.Range("A1"), jsonText, "$", _
+        nonTableArraysAsJson:=arraysAsJson
+    secs(4, col) = PP_Elapsed(t0)
+
+    Dim lo As ListObject
+    Set lo = ws.ListObjects("tPerf")
+    outRows = lo.ListRows.count
+    outCols = lo.ListColumns.count
+
+    ' 5) upsert refresh (same table, same schema)
+    t0 = Timer
+    Excel_UpsertListObjectFromJsonAtRoot ws, "tPerf", ws.Range("A1"), jsonText, "$", _
+        nonTableArraysAsJson:=arraysAsJson
+    secs(5, col) = PP_Elapsed(t0)
+
+    jsonText = vbNullString
+
+    ' 6) export back to JSON
+    t0 = Timer
+    Dim exported As String
+    exported = Excel_ListObjectToJson(lo)
+    secs(6, col) = PP_Elapsed(t0)
+    exported = vbNullString
+
+    PP_DeleteSheet ws
+    Exit Sub
+
+MFail:
+    PP_DeleteSheet ws
+    Err.Raise Err.Number, Err.Source, Err.Description
+End Sub
+
+' "tbl_flat_100k.json" -> "flat_100k" for compact column headers.
+Private Function PP_ShortLabel(ByVal fileName As String) As String
+    Dim s As String
+    s = fileName
+    If LCase$(Right$(s, 5)) = ".json" Then s = Left$(s, Len(s) - 5)
+    If LCase$(Left$(s, 4)) = "tbl_" Then s = Mid$(s, 5)
+    PP_ShortLabel = s
+End Function

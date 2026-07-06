@@ -49,6 +49,30 @@ Private Type JsonReader
     textLen As Long
 End Type
 
+' Row-schema cache for the streaming table sink. Arrays-of-objects almost
+' always repeat the same member sequence row after row, so each top-level
+' key's raw bytes are recorded once (concatenated in keyData) and later rows
+' match keys with a typed byte comparison: no string allocation, no path
+' escaping, no hash lookup on the hit path. Entries store the escaped path
+' and a lazily resolved column; the value's shape is dispatched per row, so
+' a key whose value alternates between null and an object stays cached. A
+' key MISMATCH truncates the sequence at that position and re-records
+' (adaptive; mixed schemas degrade to the plain path, never below it).
+' Only escape-free keys are recorded: for them, raw text equals the decoded
+' key, and a byte-equal region can contain no quote or backslash, so the
+' character after it is guaranteed to be the closing quote.
+Private Type JsonRowSeq
+    keyData() As Byte    ' concatenated raw key bytes for all entries
+    keyOff() As Long     ' byte offset of each entry's key within keyData
+    keyLens() As Long    ' character length of each raw key
+    cols() As Long       ' resolved column for cell writes (0 = not yet)
+    paths() As String    ' escaped path segment (also the descend prefix)
+    keyDataUsed As Long
+    count As Long
+    pos As Long          ' entries matched so far in the current row
+    allocated As Boolean ' arrays dimensioned (count alone can drop to 0)
+End Type
+
 ' =============================================================================
 ' Public API
 ' =============================================================================
@@ -576,16 +600,11 @@ Private Function JR_ReadObject(ByRef r As JsonReader) As Collection
         Dim value As Variant
         Json_ReadValue r, value
 
-        Dim vv As Variant
-        If IsObject(value) Then
-            Set vv = value
-        Else
-            vv = value
-        End If
-
         ' Pairs must be built with Array(...): a fixed-size local array would
         ' be reused across iterations and alias every pair to the same data.
-        obj.Add Array(key, vv)
+        ' Array() copies its Variant arguments itself, object references
+        ' included, so no Set/Let staging is needed here.
+        obj.Add Array(key, value)
 
         JR_SkipWs r
 
@@ -659,6 +678,8 @@ Public Function Json_TryParseTableStream( _
     If rowCap < 1 Then rowCap = 1
     ReDim outData(1 To rowCap, 1 To 8)          ' columns grow on demand
 
+    Dim seq As JsonRowSeq
+
     Do
         JR_SkipWs r
 
@@ -670,7 +691,7 @@ Public Function Json_TryParseTableStream( _
         outRowCount = outRowCount + 1
         If outRowCount > UBound(outData, 1) Then JR_GrowRows outData
 
-        JR_StreamObjectRow r, vbNullString, nonTableArraysAsJson, headerIdx, outData, outRowCount
+        JR_StreamRowTop r, seq, nonTableArraysAsJson, headerIdx, outData, outRowCount
 
         JR_SkipWs r
 
@@ -687,6 +708,239 @@ Public Function Json_TryParseTableStream( _
 
     JR_CheckTrailing r
     Json_TryParseTableStream = True
+End Function
+
+' Stream one top-level row object using the row-schema cache. The cursor is
+' at the row's "{" on entry. Nested objects descend through the uncached
+' JR_StreamObjectRow with the cached path as prefix.
+Private Sub JR_StreamRowTop( _
+    ByRef r As JsonReader, _
+    ByRef seq As JsonRowSeq, _
+    ByVal nonTableArraysAsJson As Boolean, _
+    ByRef headerIdx As JsonStringIndex, _
+    ByRef outData As Variant, _
+    ByVal rowNumber As Long _
+)
+    r.pos = r.pos + 1                           ' consume "{"
+    JR_SkipWs r
+
+    If JR_CodeAt(r) = 125 Then                  ' "}": empty object
+        r.pos = r.pos + 1
+        Exit Sub
+    End If
+
+    seq.pos = 0
+
+    Do
+        Dim matched As Boolean
+        matched = False
+
+        Dim idx As Long
+        Dim c As Long
+
+        ' ---- Cache-hit attempt: raw byte compare against the expected key ----
+        If seq.pos < seq.count Then
+            If JR_CodeAt(r) = 34 Then           ' at an opening quote
+                idx = seq.pos + 1
+
+                Dim keyStart As Long
+                keyStart = r.pos + 1
+
+                Dim klen As Long
+                klen = seq.keyLens(idx)
+
+                If keyStart + klen <= r.textLen Then
+                    Dim off As Long
+                    off = (keyStart - 1) * 2
+
+                    ' Closing quote exactly where the cached key ends?
+                    If r.bytes(off + klen * 2) = 34 Then
+                        If r.bytes(off + klen * 2 + 1) = 0 Then
+                            Dim ko As Long
+                            ko = seq.keyOff(idx)
+
+                            matched = True
+                            Dim b As Long
+                            For b = 0 To klen * 2 - 1
+                                If r.bytes(off + b) <> seq.keyData(ko + b) Then
+                                    matched = False
+                                    Exit For
+                                End If
+                            Next b
+                        End If
+                    End If
+                End If
+            End If
+        End If
+
+        If matched Then
+            r.pos = keyStart + klen + 1         ' past the closing quote
+            JR_ExpectChar r, 58, ":"
+            JR_SkipWs r
+
+            ' Dispatch on the value's ACTUAL shape; the cached path and
+            ' column apply regardless of what shape this key had before.
+            c = JR_CodeAt(r)
+
+            If c = 123 Then                     ' nested object
+                JR_StreamObjectRow r, seq.paths(idx), nonTableArraysAsJson, headerIdx, outData, rowNumber
+
+            ElseIf c = 91 Then                  ' nested array
+                Dim av As Variant
+                Json_ReadValue r, av
+
+                If nonTableArraysAsJson Then
+                    If seq.cols(idx) = 0 Then
+                        seq.cols(idx) = JsonIdx_Ensure(headerIdx, seq.paths(idx))
+                        Json_Grow2DCols outData, seq.cols(idx)
+                    End If
+                    outData(rowNumber, seq.cols(idx)) = Json_Stringify(av)
+                End If
+
+            Else                                ' primitive
+                Dim v As Variant
+                Json_ReadValue r, v
+
+                If seq.cols(idx) = 0 Then
+                    seq.cols(idx) = JsonIdx_Ensure(headerIdx, seq.paths(idx))
+                    Json_Grow2DCols outData, seq.cols(idx)
+                End If
+                outData(rowNumber, seq.cols(idx)) = v
+            End If
+
+            seq.pos = seq.pos + 1
+        Else
+            ' ---- Plain path: decode, resolve, and (re)record the schema ----
+            Dim posBeforeKey As Long
+            posBeforeKey = r.pos
+
+            Dim key As String
+            key = JR_ReadJsonString(r)
+
+            ' Raw length: cursor is one past the closing quote.
+            Dim rawLen As Long
+            rawLen = r.pos - posBeforeKey - 2
+
+            JR_ExpectChar r, 58, ":"
+            JR_SkipWs r
+
+            Dim path As String
+            path = Json_EscapePathSegment(key)
+
+            ' A key that diverges from the recorded sequence invalidates the
+            ' remainder; escape-free keys re-record at this position.
+            seq.count = seq.pos
+
+            Dim recorded As Long
+            recorded = 0
+            If rawLen = Len(key) And rawLen > 0 Then
+                recorded = JR_SeqAppend(seq, r, posBeforeKey + 1, rawLen, path)
+            End If
+
+            c = JR_CodeAt(r)
+
+            If c = 123 Then                     ' nested object
+                JR_StreamObjectRow r, path, nonTableArraysAsJson, headerIdx, outData, rowNumber
+
+            ElseIf c = 91 Then                  ' nested array
+                Dim av2 As Variant
+                Json_ReadValue r, av2
+
+                If nonTableArraysAsJson Then
+                    Dim colA As Long
+                    colA = JsonIdx_Ensure(headerIdx, path)
+                    Json_Grow2DCols outData, colA
+                    outData(rowNumber, colA) = Json_Stringify(av2)
+                    If recorded > 0 Then seq.cols(recorded) = colA
+                End If
+
+            Else                                ' primitive
+                Dim v2 As Variant
+                Json_ReadValue r, v2
+
+                Dim colP As Long
+                colP = JsonIdx_Ensure(headerIdx, path)
+                Json_Grow2DCols outData, colP
+                outData(rowNumber, colP) = v2
+                If recorded > 0 Then seq.cols(recorded) = colP
+            End If
+
+            If recorded > 0 Then seq.pos = seq.count
+        End If
+
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 44             ' ","
+                r.pos = r.pos + 1
+                JR_SkipWs r
+            Case 125            ' "}"
+                r.pos = r.pos + 1
+                Exit Do
+            Case Else
+                Err.Raise vbObjectError + 760, ERR_SRC, "Expected ',' or '}' at pos " & r.pos
+        End Select
+    Loop
+End Sub
+
+' Append one entry to the row-schema cache, copying the raw key bytes into
+' the flat buffer. Returns the new entry's 1-based index.
+Private Function JR_SeqAppend( _
+    ByRef seq As JsonRowSeq, _
+    ByRef r As JsonReader, _
+    ByVal keyStart As Long, _
+    ByVal klen As Long, _
+    ByRef path As String _
+) As Long
+
+    Dim n As Long
+    n = seq.count + 1
+
+    If Not seq.allocated Then
+        ReDim seq.keyOff(1 To 8) As Long
+        ReDim seq.keyLens(1 To 8) As Long
+        ReDim seq.cols(1 To 8) As Long
+        ReDim seq.paths(1 To 8) As String
+        ReDim seq.keyData(0 To 255) As Byte
+        seq.keyDataUsed = 0
+        seq.allocated = True
+    ElseIf n > UBound(seq.keyOff) Then
+        ReDim Preserve seq.keyOff(1 To UBound(seq.keyOff) * 2) As Long
+        ReDim Preserve seq.keyLens(1 To UBound(seq.keyLens) * 2) As Long
+        ReDim Preserve seq.cols(1 To UBound(seq.cols) * 2) As Long
+        ReDim Preserve seq.paths(1 To UBound(seq.paths) * 2) As String
+    End If
+
+    Dim needBytes As Long
+    needBytes = klen * 2
+
+    ' Truncation resets count but keyDataUsed keeps growing; compact only by
+    ' appending (offsets of live entries never move).
+    If seq.keyDataUsed + needBytes > UBound(seq.keyData) + 1 Then
+        Dim newCap As Long
+        newCap = (UBound(seq.keyData) + 1) * 2
+        Do While seq.keyDataUsed + needBytes > newCap
+            newCap = newCap * 2
+        Loop
+        ReDim Preserve seq.keyData(0 To newCap - 1) As Byte
+    End If
+
+    Dim srcOff As Long
+    srcOff = (keyStart - 1) * 2
+
+    Dim i As Long
+    For i = 0 To needBytes - 1
+        seq.keyData(seq.keyDataUsed + i) = r.bytes(srcOff + i)
+    Next i
+
+    seq.keyOff(n) = seq.keyDataUsed
+    seq.keyLens(n) = klen
+    seq.cols(n) = 0
+    seq.paths(n) = path
+    seq.keyDataUsed = seq.keyDataUsed + needBytes
+
+    seq.count = n
+    JR_SeqAppend = n
 End Function
 
 ' Stream one object's members into row rowNumber, recursing into nested

@@ -337,7 +337,15 @@ Private Sub Excel_ListObjectUpsertData( _
 
     ' ---- Write ----
     If clearExisting Then
-        If oldBodyRows > 0 Then oldBody.ClearContents
+        ' Clearing the old body is only needed when the incoming write does
+        ' not overwrite every old cell (fewer rows or fewer columns). A
+        ' same-size or larger refresh covers the whole footprint, so the
+        ' clear would be a wasted full-range operation.
+        If oldBodyRows > 0 Then
+            If newBodyRows < oldBodyRows Or newCols < oldCols Then
+                oldBody.ClearContents
+            End If
+        End If
 
         Excel_ResizeTableToRowCol lo, finalHeaders, newBodyRows
 

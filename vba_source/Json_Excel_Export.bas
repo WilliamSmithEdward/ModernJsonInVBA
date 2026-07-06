@@ -189,11 +189,65 @@ Public Function Excel_ListObjectToJson( _
 
         JsonSB_Append out, "["
 
+        Dim firstMember As Boolean
+
+        If Not parseJsonInCells And Not preserveFormulas Then
+            ' Plain-cells loop (the default call): with both features off,
+            ' cell resolution is just the raw Value2 entry, so the helper
+            ' call and its Variant hand-off per cell are skipped. Value2
+            ' never returns objects, making the direct assignment safe.
+            Dim rowBase As Long
+            Dim colBase As Long
+            rowBase = LBound(data, 1) - 1
+            colBase = LBound(data, 2) - 1
+
+            For r = 1 To rowCount
+                If r > 1 Then JsonSB_Append out, ","
+                JsonSB_Append out, "{"
+
+                firstMember = True
+
+                For c = 1 To colCount
+                    v = data(rowBase + r, colBase + c)
+
+                    If IsError(v) Then
+                        Err.Raise vbObjectError + 1170, SRC, _
+                            "Excel error value at row " & r & ", col " & c
+                    End If
+
+                    If VarType(v) = vbString Then
+                        isBlank = (LenB(v) = 0)
+                    Else
+                        isBlank = IsEmpty(v)
+                    End If
+
+                    If isBlank Then
+                        If Not includeBlanksAsNull Then GoTo NextPlainCell
+                        v = Null
+                    End If
+
+                    If Not firstMember Then JsonSB_Append out, ","
+                    firstMember = False
+
+                    JsonSB_Append out, keyPrefix(c)
+                    Json_StringifyInto out, v
+
+NextPlainCell:
+                Next c
+
+                JsonSB_Append out, "}"
+            Next r
+
+            JsonSB_Append out, "]"
+
+            Excel_ListObjectToJson = JsonSB_Text(out)
+            Exit Function
+        End If
+
         For r = 1 To rowCount
             If r > 1 Then JsonSB_Append out, ","
             JsonSB_Append out, "{"
 
-            Dim firstMember As Boolean
             firstMember = True
 
             For c = 1 To colCount
