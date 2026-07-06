@@ -1,0 +1,70 @@
+# Changelog
+
+All notable changes to ModernJsonInVBA are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+## [3.0.0] - 2026-07-05
+
+This release reorganizes the library into eleven modules split by concern and
+rewrites the parser and Excel ingestion path for speed. The public API is
+unchanged, so existing calling code runs without edits. The module split is
+the only breaking change: you import eleven files instead of pasting one.
+
+### Breaking
+
+- The library ships as eleven `.bas` modules (in `vba_source/`) instead of the
+  single `zz_ModernJsonInVBA` module. Remove the old module and import all
+  eleven. Function names, arguments, return shapes, and error numbers are
+  unchanged, so calling code does not change.
+
+### Added
+
+- `json_payloads/`: a seeded payload generator (`generate_payloads.py`) and a
+  workbook macro suite (`Run_JsonPerfSuite`, `Run_JsonPerfMatrix`) that print
+  Markdown timing reports to the Immediate window.
+- `PERFORMANCE.md`: a measured timing table across the JSON parser and Excel
+  ListObject surface, regenerable from the workbook.
+- `vba_source/`: the eleven modules as individual files for import and version
+  control.
+
+### Changed
+
+- Module layout by concern: `Json_Common` (shared plumbing), `Json_Parser`,
+  `Json_Serializer`, `Json_Model`, `Json_Transforms`, `Json_Tables`,
+  `Json_Coalesce`, `Json_Csv`, `Json_Xml`, `Json_Excel` (table ingestion), and
+  `Json_Excel_Export` (table and range export). The README lists what each
+  module owns.
+- Rewrote the module and README comments and removed dead procedures left over
+  from the single-module layout.
+
+### Fixed
+
+- The 32-bit FNV hash used `LongLong`, which does not compile on 32-bit Office.
+  It is replaced with a Long-only rolling hash, so every module now compiles on
+  both 32-bit and 64-bit Office.
+- CSV conversion escapes control characters, so `CsvTextToJson` output always
+  parses back through `Json_Parse`. Previously a tab or other control byte in a
+  field produced JSON that the parser rejected.
+
+### Performance
+
+Measured against the previous single-module release on a Ryzen 7 9800X3D with
+64-bit Excel. Times are hardware dependent; see `PERFORMANCE.md` for the full
+table and method.
+
+- Table ingestion streams JSON text directly into a 2D array for the common
+  `tableRoot = "$"` case and does not build the intermediate object model. A
+  per-row key cache reuses the column layout from one row to the next.
+- Large table writes go to the sheet in one block. The former 50,000-cell
+  chunking is removed; a block-write fallback remains for memory-constrained
+  hosts.
+- Character scanning reads UTF-16 code units from a byte snapshot of the input
+  rather than allocating a one-character string per position.
+- JSON parsing is about 4x faster. Table-row extraction and CSV conversion,
+  which previously scaled quadratically on large inputs, are about an order of
+  magnitude faster.
+- A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
+  the benchmark machine.
+
+[3.0.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.0.0
