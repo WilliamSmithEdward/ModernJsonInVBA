@@ -22,8 +22,10 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
   - [Timings (seconds)](#timings-seconds)
   - [Reproducing these numbers](#reproducing-these-numbers)
 - [Installation](#installation)
-  - [Option 1: Import Into Your Workbook](#option-1-import-into-your-workbook)
-  - [Option 2: Use the Provided Workbook](#option-2-use-the-provided-workbook)
+  - [Option 1: Single file, Excel](#option-1-single-file-excel-recommended)
+  - [Option 2: Single file, all O365 apps](#option-2-single-file-all-o365-apps-word-powerpoint-access-excel)
+  - [Option 3: The eleven source modules](#option-3-the-eleven-source-modules)
+  - [Option 4: Use the provided workbook](#option-4-use-the-provided-workbook)
 - [Requirements](#requirements)
 - [Basic API Example](#basic-api-example)
   - [Refresh Mode](#refresh-mode)
@@ -199,20 +201,40 @@ picked up automatically.
 
 ## Installation
 
-ModernJsonInVBA supports two usage models:
+Pick whichever fits your host and workflow.
 
--   Import the modules into your own workbook (recommended)
--   Use the provided `.xlsm` file directly
+### Option 1: Single file, Excel (recommended)
 
-### Option 1: Import Into Your Workbook
+1.  Download `dist/ModernJsonInVBA_Excel.bas`
+2.  Open your workbook and press `ALT + F11`
+3.  File → Import File... and select that one file
+4.  Save as `.xlsm`
 
-1.  Download the `.bas` files from the `vba_source/` folder
-2.  Open your Excel workbook
-3.  Press `ALT + F11`
-4.  File → Import File... and import **all eleven** modules
-5.  Save as `.xlsm`
+One module holds the whole library: JSON parse and serialize, CSV and XML
+conversion, and the Excel ListObject integration.
 
-The library is split by concern; all eleven modules are required:
+------------------------------------------------------------------------
+
+### Option 2: Single file, all O365 apps (Word, PowerPoint, Access, Excel)
+
+1.  Download `dist/ModernJsonInVBA_AllO365.bas`
+2.  Open your Office document and press `ALT + F11`
+3.  File → Import File... and select that one file
+
+This module has no Excel references, so it imports into any O365 VBA host.
+It covers JSON parse and serialize, flatten and unflatten, path resolution,
+table extraction to a 2D array, and CSV and XML conversion. It leaves out the
+`Excel_*` ListObject functions, which need Excel. Both single-file modules use
+the same module name and the same function names, so code written against the
+all-O365 module keeps working if you later move to the Excel module.
+
+------------------------------------------------------------------------
+
+### Option 3: The eleven source modules
+
+Import the individual `.bas` files from `vba_source/` instead of a single
+file. Use this to read or edit the library by concern, or to track it in
+version control. All eleven are required:
 
 | Module              | Responsibility                                    |
 |---------------------|---------------------------------------------------|
@@ -228,24 +250,26 @@ The library is split by concern; all eleven modules are required:
 | `Json_Excel`        | ListObject ingestion (upsert pipeline)            |
 | `Json_Excel_Export` | ListObject / range → JSON export                  |
 
-The public API (every function documented below) is unchanged from the
-earlier single-module releases, so existing code keeps working as-is.
+The two `dist/` single files are generated from these modules by
+`build_dist.py`; edit the modules here and re-run it. The public API is
+unchanged from the earlier single-module releases, so existing code keeps
+working as-is.
 
 ------------------------------------------------------------------------
 
-### Option 2: Use the Provided Workbook
+### Option 4: Use the provided workbook
 
 1.  Download `ModernJsonInVBA.xlsm`
-2.  Open the file
-3.  Enable macros
+2.  Open the file and enable macros
 
-You may export/import the modules into another workbook if needed.
+You may export or import the modules into another workbook if needed.
 
 ------------------------------------------------------------------------
 
 ## Requirements
 
--   Excel with VBA support (Windows and macOS)
+-   Excel with VBA support (Windows and macOS) for the Excel table features
+-   Any VBA host (Word, PowerPoint, Access, Excel) for the all-O365 module
 -   Macros enabled
 -   No external references required
 
