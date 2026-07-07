@@ -4,6 +4,19 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] - 2026-07-07
+
+### Added
+
+- `Json_TryParse`: non-raising parse. Returns `True` and fills the output value
+  on success; returns `False` on malformed input, with the output value set to
+  `Null` and an optional `outError` holding the position-aware reason (the same
+  message `Json_Parse` raises). For JSON of uncertain provenance (an API
+  response that might be an error page, pasted input, an untrusted file), the
+  caller branches on the return value instead of installing an error handler.
+  The raising `Json_Parse` and `Json_ParseInto` are unchanged. Host-agnostic,
+  so it is in both single-file builds.
+
 ## [3.3.0] - 2026-07-07
 
 ### Added
@@ -101,6 +114,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.4.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.4.0
 [3.3.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.3.0
 [3.2.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.2.0
 [3.1.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.1.0

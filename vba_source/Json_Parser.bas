@@ -119,6 +119,35 @@ Public Sub Json_ParseInto(ByVal jsonText As String, ByRef outValue As Variant)
     End If
 End Sub
 
+' Non-raising parse. Returns True and fills outValue with the model on success
+' (outError is set to ""); returns False on any malformed input, with outValue
+' set to Null and outError holding the position-aware reason (the same message
+' Json_Parse would have raised, e.g. "Invalid number at pos 12").
+'
+' This is the defensive companion to Json_ParseInto, for JSON of uncertain
+' provenance: an API response that might be an error page, pasted user input, or
+' a file that may not be JSON. The caller branches on the return value instead
+' of installing an error handler.
+Public Function Json_TryParse( _
+    ByVal jsonText As String, _
+    ByRef outValue As Variant, _
+    Optional ByRef outError As String _
+) As Boolean
+
+    On Error GoTo Fail
+
+    Json_ParseInto jsonText, outValue
+    outError = vbNullString
+    Json_TryParse = True
+    Exit Function
+
+Fail:
+    ' Discard any partial value the parser assigned before it raised.
+    outValue = Null
+    outError = Err.Description
+    Json_TryParse = False
+End Function
+
 ' =============================================================================
 ' Reader primitives
 ' =============================================================================

@@ -809,6 +809,9 @@ Errors protect against:
 - `Public Sub Json_ParseInto(ByVal jsonText As String, ByRef outValue As Variant)`  
   Parses JSON text into an output `Variant` passed by reference.
 
+- `Public Function Json_TryParse(ByVal jsonText As String, ByRef outValue As Variant, Optional ByRef outError As String) As Boolean`  
+  Non-raising parse. Returns `True` and fills `outValue` on success (with `outError` set to `""`); returns `False` on malformed input, with `outValue` set to `Null` and `outError` holding the position-aware reason (the same message `Json_Parse` would have raised). Use it for JSON of uncertain provenance (an API response that might be an error page, pasted input, an untrusted file) so you branch on the return value instead of installing an error handler.
+
 - `Public Function Json_Stringify(ByVal v As Variant) As String`  
   Serializes the in-memory JSON model back into deterministic JSON text (compact, single line).
 
