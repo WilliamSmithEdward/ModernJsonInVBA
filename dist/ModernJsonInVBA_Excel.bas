@@ -627,8 +627,9 @@ End Function
 '   Primitives  => Variant (Null, Boolean, Long/Double, String)
 '
 ' Json_TryParseTableStream (internal) is an alternative sink over the same
-' reader: it streams a root array-of-objects directly into a 2D array plus
-' header index for Excel ingestion, skipping model construction entirely.
+' reader: it streams an array-of-objects, at the document root or nested
+' under a simple tableRoot such as "$.data.items", directly into a 2D array
+' plus header index for Excel ingestion, skipping model construction.
 '
 ' Strictness follows RFC 8259: no leading zeros, no trailing commas, no
 ' unescaped control characters, surrogate pairs validated, no trailing text.
@@ -1223,21 +1224,29 @@ End Function
 ' Streaming table sink (internal: used by Excel_UpsertListObjectFromJsonAtRoot)
 ' =============================================================================
 
-' Stream a root-level JSON array-of-objects directly into a 2D Variant array
-' plus a header index, without building the Collection model. Cell values,
-' header discovery order, duplicate-key overwrites, and the validations the
-' model path performs are reproduced exactly:
+' Stream a JSON array-of-objects directly into a 2D Variant array plus a
+' header index, without building the Collection model. The array may sit at
+' the document root (tableRoot "$") or nested under simple member steps
+' (tableRoot "$.data.items"): the reader descends to the table root, moving
+' past sibling members with validating skip scanners that build nothing and,
+' for the usual escape-free text, allocate nothing. Cell values, header
+' discovery order, duplicate-key overwrites, and the validations the model
+' path performs are reproduced exactly:
 '
 '   - nested objects contribute dotted, escaped column paths
 '   - nested arrays are fully parsed through the model (so their content is
 '     validated) and either stringified into the cell or discarded,
 '     depending on nonTableArraysAsJson
 '   - a non-object element raises 1163 with the caller-supplied source
-'   - trailing text after the array raises 700, like Json_ParseInto
+'   - sibling members before and after the table array are validated, and
+'     text after the document value raises 700, so a malformed document is
+'     rejected exactly as if the model path had parsed all of it
 '
-' Returns False WITHOUT raising when the root value is not an array; the
-' caller then falls back to the model path, which owns the root-shape error
-' semantics (1130/1160/1162).
+' Returns False WITHOUT raising when the streamed shape does not apply: the
+' value at the table root is not an array, a descent step hits a non-object
+' or an absent key, or tableRoot uses features beyond simple member steps
+' (bracket indices). The caller then falls back to the model path, which
+' owns those error semantics (1130/1160/1162).
 Public Function Json_TryParseTableStream( _
     ByVal jsonText As String, _
     ByVal nonTableArraysAsJson As Boolean, _
@@ -1245,17 +1254,44 @@ Public Function Json_TryParseTableStream( _
     ByRef outData As Variant, _
     ByRef outRowCount As Long, _
     ByVal rowErrorSource As String, _
-    ByVal tableRootLabel As String _
+    ByVal tableRoot As String _
 ) As Boolean
 
     Json_TryParseTableStream = False
     outRowCount = 0
 
+    ' Path analysis: "$" streams at the document root; "$.a.b" descends one
+    ' member step per segment. Everything else declines to the model path.
+    ' Trimming matches Json_TryResolvePath, so both paths address the same
+    ' root for the same input.
+    Dim segs() As String
+    Dim segCount As Long
+
+    Dim root As String
+    root = Trim$(tableRoot)
+
+    If root <> "$" Then
+        If Left$(root, 2) <> "$." Then Exit Function
+        If InStr(1, root, "[", vbBinaryCompare) > 0 Then Exit Function
+
+        segs = Split(Mid$(root, 3), ".")
+        segCount = UBound(segs) + 1
+
+        Dim si As Long
+        For si = 0 To UBound(segs)
+            If Len(segs(si)) = 0 Then Exit Function
+        Next si
+    End If
+
     Dim r As JsonReader
     JR_Init r, jsonText
 
+    If segCount > 0 Then
+        If Not JR_DescendToRoot(r, segs) Then Exit Function
+    End If
+
     JR_SkipWs r
-    If JR_CodeAt(r) <> 91 Then Exit Function    ' root is not an array
+    If JR_CodeAt(r) <> 91 Then Exit Function    ' table root is not an array
 
     ' Committed to streaming. Pre-count the top-level elements so the row
     ' dimension (which ReDim Preserve cannot grow) is allocated exactly.
@@ -1267,7 +1303,7 @@ Public Function Json_TryParseTableStream( _
 
     If JR_CodeAt(r) = 93 Then                   ' "]": empty array
         r.pos = r.pos + 1
-        JR_CheckTrailing r
+        JR_FinishDocument r, segCount
         Json_TryParseTableStream = True
         Exit Function
     End If
@@ -1282,7 +1318,7 @@ Public Function Json_TryParseTableStream( _
 
         If JR_CodeAt(r) <> 123 Then
             Err.Raise vbObjectError + 1163, rowErrorSource, _
-                "Array element at index " & outRowCount & " is not an object for root: " & tableRootLabel
+                "Array element at index " & outRowCount & " is not an object for root: " & tableRoot
         End If
 
         outRowCount = outRowCount + 1
@@ -1303,7 +1339,7 @@ Public Function Json_TryParseTableStream( _
         End Select
     Loop
 
-    JR_CheckTrailing r
+    JR_FinishDocument r, segCount
     Json_TryParseTableStream = True
 End Function
 
@@ -1694,6 +1730,224 @@ Private Sub JR_CheckTrailing(ByRef r As JsonReader)
     If Not JR_Eof(r) Then
         Err.Raise vbObjectError + 700, Json_Parser_ERR_SRC, "Unexpected trailing characters at pos " & r.pos
     End If
+End Sub
+
+' =============================================================================
+' Nested-root descent and validating skips
+'
+' Support for streaming a table nested under a tableRoot such as
+' "$.data.items". The descent walks member steps, skipping sibling values;
+' after the table array closes, JR_FinishDocument consumes the rest of each
+' enclosing object. Skipped text is validated with the same rules and error
+' numbers as the reading path, so a malformed document is rejected whether
+' its defect sits inside the table or beside it. Keys compare decoded and
+' case-sensitive, first match wins: the same rules Json_TryObjGet applies
+' when the model path resolves the identical tableRoot.
+' =============================================================================
+
+' Walk the reader down one object level per segment. On success the cursor
+' rests at the matched member's value and True returns. Returns False (the
+' stream then declines to the model path) when a step's container is not an
+' object or the key is absent. Malformed text raises the reader's usual
+' errors.
+Private Function JR_DescendToRoot(ByRef r As JsonReader, ByRef segs() As String) As Boolean
+    Dim si As Long
+    For si = 0 To UBound(segs)
+        JR_SkipWs r
+        If JR_CodeAt(r) <> 123 Then Exit Function   ' not an object: decline
+        r.pos = r.pos + 1
+        JR_SkipWs r
+
+        If JR_CodeAt(r) = 125 Then Exit Function    ' empty object: key absent
+
+        Dim found As Boolean
+        found = False
+
+        Do
+            Dim key As String
+            key = JR_ReadJsonString(r)
+            JR_ExpectChar r, 58, ":"
+
+            If StrComp(key, segs(si), vbBinaryCompare) = 0 Then
+                found = True
+                Exit Do
+            End If
+
+            JR_SkipValue r
+            JR_SkipWs r
+
+            Select Case JR_CodeAt(r)
+                Case 44             ' ","
+                    r.pos = r.pos + 1
+                Case 125            ' "}": key not present at this level
+                    Exit Do
+                Case Else
+                    Err.Raise vbObjectError + 760, Json_Parser_ERR_SRC, "Expected ',' or '}' at pos " & r.pos
+            End Select
+        Loop
+
+        If Not found Then Exit Function
+    Next si
+
+    JR_DescendToRoot = True
+End Function
+
+' After the streamed array closes, consume the remainder of each enclosing
+' object (validating any sibling members that follow the table), then
+' require end of input. With levels = 0 this is exactly the old root-level
+' trailing check.
+Private Sub JR_FinishDocument(ByRef r As JsonReader, ByVal levels As Long)
+    Dim lvl As Long
+    For lvl = 1 To levels
+        Do
+            JR_SkipWs r
+
+            Select Case JR_CodeAt(r)
+                Case 44             ' ",": another sibling member
+                    r.pos = r.pos + 1
+                    JR_SkipJsonString r
+                    JR_ExpectChar r, 58, ":"
+                    JR_SkipValue r
+                Case 125            ' "}"
+                    r.pos = r.pos + 1
+                    Exit Do
+                Case Else
+                    Err.Raise vbObjectError + 760, Json_Parser_ERR_SRC, "Expected ',' or '}' at pos " & r.pos
+            End Select
+        Loop
+    Next lvl
+
+    JR_CheckTrailing r
+End Sub
+
+' Skip one JSON value, accepting and rejecting exactly what Json_ReadValue
+' accepts and rejects, but building nothing. Numbers reuse JR_ReadNumber
+' (allocation-free for short integers); containers recurse.
+Private Sub JR_SkipValue(ByRef r As JsonReader)
+    JR_SkipWs r
+
+    Select Case JR_CodeAt(r)
+        Case 34                     ' quote
+            JR_SkipJsonString r
+
+        Case 116                    ' "t"
+            JR_ExpectLiteral r, "true"
+
+        Case 102                    ' "f"
+            JR_ExpectLiteral r, "false"
+
+        Case 110                    ' "n"
+            JR_ExpectLiteral r, "null"
+
+        Case 45, 48 To 57           ' "-", "0".."9"
+            JR_ReadNumber r
+
+        Case 91                     ' "["
+            JR_SkipArray r
+
+        Case 123                    ' "{"
+            JR_SkipObject r
+
+        Case Else
+            Dim ch As String
+            If r.pos <= r.textLen Then ch = Mid$(r.text, r.pos, 1) Else ch = vbNullString
+            Err.Raise vbObjectError + 701, Json_Parser_ERR_SRC, _
+                "Unexpected token '" & ch & "' at pos " & r.pos
+    End Select
+End Sub
+
+' Skip a JSON string with the same validation as JR_ReadJsonString but no
+' text materialization. One byte scan bounded to the string's own extent
+' both rejects unescaped control characters and probes for a backslash; the
+' escape-free case (the overwhelming majority) then just advances the
+' cursor. A string containing escapes falls back to the full reader with
+' the result discarded, so escape and surrogate validation stay in one
+' place.
+Private Sub JR_SkipJsonString(ByRef r As JsonReader)
+    JR_SkipWs r
+
+    If JR_CodeAt(r) <> 34 Then
+        JR_ExpectChar r, 34, """"   ' raises 520 with the reader's message
+    End If
+
+    Dim contentStart As Long
+    contentStart = r.pos + 1
+
+    Dim qPos As Long
+    qPos = InStr(contentStart, r.text, """", vbBinaryCompare)
+    If qPos = 0 Then
+        Err.Raise vbObjectError + 523, Json_Parser_ERR_SRC, "Unterminated string"
+    End If
+
+    Dim i As Long
+    For i = contentStart To qPos - 1
+        If r.bytes((i - 1) * 2 + 1) = 0 Then
+            Select Case r.bytes((i - 1) * 2)
+                Case 92
+                    ' Escapes present: the cursor still sits on the opening
+                    ' quote, so the full reader takes over from scratch.
+                    JR_ReadJsonString r
+                    Exit Sub
+                Case 0 To 31
+                    Err.Raise vbObjectError + 526, Json_Parser_ERR_SRC, _
+                        "Unescaped control character in string at pos " & i
+            End Select
+        End If
+    Next i
+
+    r.pos = qPos + 1
+End Sub
+
+Private Sub JR_SkipArray(ByRef r As JsonReader)
+    r.pos = r.pos + 1               ' consume "[" (dispatched on it)
+    JR_SkipWs r
+
+    If JR_CodeAt(r) = 93 Then       ' "]": empty array
+        r.pos = r.pos + 1
+        Exit Sub
+    End If
+
+    Do
+        JR_SkipValue r
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 44                 ' ","
+                r.pos = r.pos + 1
+            Case 93                 ' "]"
+                r.pos = r.pos + 1
+                Exit Do
+            Case Else
+                Err.Raise vbObjectError + 730, Json_Parser_ERR_SRC, "Expected ',' or ']' at pos " & r.pos
+        End Select
+    Loop
+End Sub
+
+Private Sub JR_SkipObject(ByRef r As JsonReader)
+    r.pos = r.pos + 1               ' consume "{" (dispatched on it)
+    JR_SkipWs r
+
+    If JR_CodeAt(r) = 125 Then      ' "}": empty object
+        r.pos = r.pos + 1
+        Exit Sub
+    End If
+
+    Do
+        JR_SkipJsonString r
+        JR_ExpectChar r, 58, ":"
+        JR_SkipValue r
+        JR_SkipWs r
+
+        Select Case JR_CodeAt(r)
+            Case 44                 ' ","
+                r.pos = r.pos + 1
+            Case 125                ' "}"
+                r.pos = r.pos + 1
+                Exit Do
+            Case Else
+                Err.Raise vbObjectError + 760, Json_Parser_ERR_SRC, "Expected ',' or '}' at pos " & r.pos
+        End Select
+    Loop
 End Sub
 
 ' ============================================================================
@@ -5325,6 +5579,9 @@ End Sub
 ' document) and written in one pipeline pass. Returns the created or updated
 ' ListObject.
 '
+' tableRoot defaults to "$" (the document root is the array-of-objects); pass a
+' JSONPath such as "$.data.items" when the rows are nested under a key.
+'
 ' nonTableArraysAsJson:
 '   False => nested arrays inside rows are excluded (prevents explosion)
 '   True  => nested arrays are stored as JSON text in their cell
@@ -5333,7 +5590,7 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
     ByVal jsonText As String, _
-    ByVal tableRoot As String, _
+    Optional ByVal tableRoot As String = "$", _
     Optional ByVal clearExisting As Boolean = True, _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False, _
@@ -5351,17 +5608,16 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     Dim data As Variant
     Dim rowCount As Long
 
-    ' Fast path for the root table ("$", the overwhelmingly common case):
-    ' stream the JSON text straight into the 2D array + header index without
-    ' building the Collection model at all. The stream declines (returns
-    ' False) when the root is not an array, and the model path below then
-    ' owns the root-shape error semantics.
+    ' Fast path: stream the JSON text straight into the 2D array + header
+    ' index without building the Collection model at all. Covers the
+    ' document root ("$") and simple nested roots ("$.data.items"), where
+    ' the stream descends past sibling members with validating skips. It
+    ' declines (returns False) for shapes it does not own - the table root
+    ' is not an array, a key on the path is absent, or the path uses
+    ' bracket indices - and the model path below then owns the error
+    ' semantics.
     Dim streamed As Boolean
-    streamed = False
-
-    If Trim$(tableRoot) = "$" Then
-        streamed = Json_TryParseTableStream(jsonText, nonTableArraysAsJson, headerIdx, data, rowCount, SRC, tableRoot)
-    End If
+    streamed = Json_TryParseTableStream(jsonText, nonTableArraysAsJson, headerIdx, data, rowCount, SRC, tableRoot)
 
     If Not streamed Then
         Dim parsed As Variant

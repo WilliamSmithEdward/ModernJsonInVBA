@@ -4,6 +4,29 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-07-07
+
+### Changed
+
+- `Excel_UpsertListObjectFromJsonAtRoot`: `tableRoot` is now optional and
+  defaults to `"$"` (the document root array-of-objects), matching
+  `Excel_UpsertListObjectFromSource`. The common call drops from five required
+  arguments to four:
+  `Excel_UpsertListObjectFromJsonAtRoot(ws, name, cell, json)`. Backward
+  compatible: callers that pass `tableRoot` explicitly are unchanged.
+
+### Performance
+
+- Table imports with a nested `tableRoot` (for example `"$.data.items"`, the
+  usual shape of an API response) now use the streaming path that previously
+  applied only to `"$"`: the reader descends to the table root and skips
+  sibling members with validating scanners instead of building the whole
+  document into the object model. A 150,000-row, 13.8 MB nested import drops
+  from 4.1 s to 2.4 s on the benchmark machine. Skipped text is validated
+  with the same rules and error numbers as before, so malformed documents,
+  missing roots, and non-array roots raise exactly as they did; bracket-index
+  paths (`"$.arr[0]"`) keep resolving through the model path.
+
 ## [3.5.0] - 2026-07-07
 
 ### Changed
@@ -128,6 +151,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.6.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.0
 [3.5.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.5.0
 [3.4.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.4.0
 [3.3.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.3.0

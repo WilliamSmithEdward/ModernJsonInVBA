@@ -531,6 +531,9 @@ End Sub
 ' document) and written in one pipeline pass. Returns the created or updated
 ' ListObject.
 '
+' tableRoot defaults to "$" (the document root is the array-of-objects); pass a
+' JSONPath such as "$.data.items" when the rows are nested under a key.
+'
 ' nonTableArraysAsJson:
 '   False => nested arrays inside rows are excluded (prevents explosion)
 '   True  => nested arrays are stored as JSON text in their cell
@@ -539,7 +542,7 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
     ByVal jsonText As String, _
-    ByVal tableRoot As String, _
+    Optional ByVal tableRoot As String = "$", _
     Optional ByVal clearExisting As Boolean = True, _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False, _
@@ -557,17 +560,16 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     Dim data As Variant
     Dim rowCount As Long
 
-    ' Fast path for the root table ("$", the overwhelmingly common case):
-    ' stream the JSON text straight into the 2D array + header index without
-    ' building the Collection model at all. The stream declines (returns
-    ' False) when the root is not an array, and the model path below then
-    ' owns the root-shape error semantics.
+    ' Fast path: stream the JSON text straight into the 2D array + header
+    ' index without building the Collection model at all. Covers the
+    ' document root ("$") and simple nested roots ("$.data.items"), where
+    ' the stream descends past sibling members with validating skips. It
+    ' declines (returns False) for shapes it does not own - the table root
+    ' is not an array, a key on the path is absent, or the path uses
+    ' bracket indices - and the model path below then owns the error
+    ' semantics.
     Dim streamed As Boolean
-    streamed = False
-
-    If Trim$(tableRoot) = "$" Then
-        streamed = Json_TryParseTableStream(jsonText, nonTableArraysAsJson, headerIdx, data, rowCount, SRC, tableRoot)
-    End If
+    streamed = Json_TryParseTableStream(jsonText, nonTableArraysAsJson, headerIdx, data, rowCount, SRC, tableRoot)
 
     If Not streamed Then
         Dim parsed As Variant

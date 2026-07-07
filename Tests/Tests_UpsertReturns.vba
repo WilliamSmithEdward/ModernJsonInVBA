@@ -29,6 +29,7 @@ Public Sub RunAll_UpsertReturnsTests_StopOnFail()
     Test_ReturnedReferenceIsUsable
     Test_EmptyArray_ReturnsTable
     Test_StatementCallStillWorks
+    Test_TableRootDefaultsToRoot
 
     MsgBox "All upsert-returns-ListObject tests passed.", vbInformation
     Exit Sub
@@ -201,6 +202,27 @@ Private Sub Test_StatementCallStillWorks()
     Dim lo As ListObject
     Set lo = ws.ListObjects("T_Stmt")
     AssertEquals 1, lo.ListRows.count, "statement-style call created the table"
+
+    DropSheet ws
+    Exit Sub
+Clean:
+    CleanupAndReraise ws
+End Sub
+
+Private Sub Test_TableRootDefaultsToRoot()
+    ' Omitting tableRoot defaults to "$" (the document root array-of-objects),
+    ' so the four-argument call produces the same table as passing "$".
+    Dim ws As Worksheet
+    Set ws = FreshSheet()
+    On Error GoTo Clean
+
+    Dim lo As ListObject
+    Set lo = Excel_UpsertListObjectFromJsonAtRoot(ws, "T_Default", ws.Range("A1"), _
+        "[{""id"":1,""name"":""Alice""},{""id"":2,""name"":""Bob""}]")
+
+    AssertSameTable ws, "T_Default", lo, "tableRoot default"
+    AssertEquals 2, lo.ListRows.count, "rows with defaulted root"
+    AssertEquals 2, lo.ListColumns.count, "cols with defaulted root"
 
     DropSheet ws
     Exit Sub
