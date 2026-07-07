@@ -295,8 +295,15 @@ Private Function Excel_TableToJson( _
     ' column instead of once per cell. Output is byte-identical to the model
     ' path because keys and values go through the same serializer writer.
     If Not anyNested Then
+        ' Two prefixes per column: the bare  "key":  for a row's first
+        ' member, and  ,"key":  with the member separator folded in for the
+        ' rest. One append per cell instead of two; on a 500k x 10 export
+        ' that removes millions of builder calls.
         Dim keyPrefix() As String
         ReDim keyPrefix(1 To colCount) As String
+
+        Dim keyPrefixSep() As String
+        ReDim keyPrefixSep(1 To colCount) As String
 
         Dim ksb As JsonTextBuilder
         Dim kv As Variant
@@ -305,6 +312,7 @@ Private Function Excel_TableToJson( _
             kv = colSimpleKey(c)
             Json_StringifyInto ksb, kv
             keyPrefix(c) = JsonSB_Text(ksb) & ":"
+            keyPrefixSep(c) = "," & keyPrefix(c)
         Next c
 
         Dim out As JsonTextBuilder
@@ -325,8 +333,11 @@ Private Function Excel_TableToJson( _
             colBase = LBound(data, 2) - 1
 
             For r = 1 To rowCount
-                If r > 1 Then JsonSB_Append out, ","
-                JsonSB_Append out, "{"
+                If r > 1 Then
+                    JsonSB_Append out, ",{"
+                Else
+                    JsonSB_Append out, "{"
+                End If
 
                 firstMember = True
 
@@ -349,10 +360,13 @@ Private Function Excel_TableToJson( _
                         v = Null
                     End If
 
-                    If Not firstMember Then JsonSB_Append out, ","
-                    firstMember = False
+                    If firstMember Then
+                        firstMember = False
+                        JsonSB_Append out, keyPrefix(c)
+                    Else
+                        JsonSB_Append out, keyPrefixSep(c)
+                    End If
 
-                    JsonSB_Append out, keyPrefix(c)
                     Json_StringifyInto out, v
 
 NextPlainCell:
@@ -368,8 +382,11 @@ NextPlainCell:
         End If
 
         For r = 1 To rowCount
-            If r > 1 Then JsonSB_Append out, ","
-            JsonSB_Append out, "{"
+            If r > 1 Then
+                JsonSB_Append out, ",{"
+            Else
+                JsonSB_Append out, "{"
+            End If
 
             firstMember = True
 
@@ -382,10 +399,13 @@ NextPlainCell:
                     v = Null
                 End If
 
-                If Not firstMember Then JsonSB_Append out, ","
-                firstMember = False
+                If firstMember Then
+                    firstMember = False
+                    JsonSB_Append out, keyPrefix(c)
+                Else
+                    JsonSB_Append out, keyPrefixSep(c)
+                End If
 
-                JsonSB_Append out, keyPrefix(c)
                 Json_StringifyInto out, v
 
 NextStreamCell:

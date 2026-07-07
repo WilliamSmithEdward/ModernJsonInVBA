@@ -171,24 +171,26 @@ Rows are pipeline steps; columns are payloads. Lower is better.
 
 | Step | flat_10k | nested_50k | escapes_50k | wide_5k_200c | flat_100k | numbers_200k | flat_500k |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Read file | 0.0273 | 0.0938 | 0.1523 | 0.1641 | 0.2227 | 0.2695 | 1.1289 |
-| Json_Parse (JSON to model) | 0.2695 | 1.5586 | 1.3203 | 2.2344 | 2.3672 | 4.3984 | 11.8789 |
-| Json_Stringify (model to JSON) | 0.2695 | 1.6719 | 1.4023 | 1.7266 | 2.5742 | 3.0430 | 12.9492 |
-| Upsert create (JSON to ListObject) | 0.3281 | 2.4727 | 2.0625 | 2.8828 | 3.4727 | 4.7383 | 18.2656 |
-| Upsert refresh | 0.3789 | 2.7422 | 2.3711 | 3.4844 | 3.9688 | 5.7305 | 20.3828 |
-| Export (ListObject to JSON) | 0.1328 | 3.5195 | 0.9609 | 0.8477 | 1.3945 | 1.1484 | 7.1094 |
+| Read file | 0.0273 | 0.0977 | 0.1602 | 0.1719 | 0.2266 | 0.2695 | 1.1367 |
+| Json_Parse (JSON to model) | 0.2383 | 1.5547 | 1.3242 | 2.2383 | 2.3672 | 4.3867 | 11.8320 |
+| Json_Stringify (model to JSON) | 0.2461 | 1.6563 | 1.3828 | 1.7227 | 2.5625 | 2.9727 | 12.8242 |
+| Upsert create (JSON to ListObject) | 0.3164 | 2.4492 | 2.0625 | 2.8828 | 3.3906 | 4.6719 | 17.6680 |
+| Upsert refresh | 0.3789 | 2.7070 | 2.3711 | 3.4805 | 3.9219 | 5.6563 | 20.1758 |
+| Export (ListObject to JSON) | 0.1211 | 3.4766 | 0.9414 | 0.7500 | 1.2617 | 0.9297 | 6.4297 |
 
 A **500,000-row, 110 MB** JSON document parses into the in-memory model in
 ~12 s and materializes into a live Excel table (`Upsert create`) in ~18 s,
-about **27,000 rows/sec**, written to the sheet in a single block with no
-chunking. Numeric-heavy rows load fastest, near **42,000 rows/sec**.
+about **28,000 rows/sec**, written to the sheet in a single block with no
+chunking. Numeric-heavy rows load fastest, near **43,000 rows/sec**.
 `Upsert create` streams JSON straight into a 2-D array with no intermediate
 object model, so the time beyond parsing is just the single Excel write.
 Streaming covers nested table roots too (`$.data.items`): sibling members
 around the table are skipped with validating scanners instead of being built
 into the model, which cut a 150,000-row nested import from 4.1 s to 2.4 s.
-Export clears 15 MB/s on flat data and slows only for `nested`, which
-rebuilds dotted column paths (`customer.address.city`) object by object.
+Export clears **17 MB/s** on flat data and **28 MB/s** on numeric-heavy
+data (integral cell numbers print through the integer formatter), slowing
+only for `nested`, which rebuilds dotted column paths
+(`customer.address.city`) object by object.
 
 ### Reproducing these numbers
 

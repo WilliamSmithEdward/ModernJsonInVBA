@@ -645,6 +645,20 @@ End Sub
 ' The separator is discovered once and cached - the former per-call
 ' CStr(1.1) probe dominated number-heavy serialization.
 Private Function Json_NumberToString(ByVal d As Double) As String
+    ' Integral values in Long range print through the integer formatter,
+    ' which is cheaper than CStr on a Double and can carry no separator.
+    ' Excel hands every cell number over as Double, so without this branch
+    ' ids and counts pay the full floating-point formatter on export. The
+    ' range check runs first so a non-finite Double falls through untouched.
+    ' Output is unchanged: an integral Double of at most ten digits never
+    ' formats with an exponent or a separator.
+    If d >= -2147483648# And d <= 2147483647# Then
+        If Fix(d) = d Then
+            Json_NumberToString = CStr(CLng(d))
+            Exit Function
+        End If
+    End If
+
     Dim s As String
     s = CStr(d)
 

@@ -3,7 +3,7 @@
 Real-world timings across the JSON parser and Excel ListObject surface.
 Regenerate with `Run_JsonPerfMatrix` (json_payloads/Performance_Payloads_.bas).
 
-- Generated: 2026-07-05 17:23:27
+- Generated: 2026-07-07 15:10:39
 - Excel 16.0 (64-bit VBA)
 - CPU: AMD Ryzen 7 9800X3D, 64 GB RAM
 - Each cell is one wall-clock run (`Timer`); payloads are deterministic (seeded).
@@ -22,11 +22,11 @@ Regenerate with `Run_JsonPerfMatrix` (json_payloads/Performance_Payloads_.bas).
 
 ## Timings (seconds)
 
-| Step | flat_10k | nested_50k | escapes_50k | wide_5k_200c | flat_100k | numbers_200k | flat_500k |
+| Step | flat_10k (2.1 MB) | nested_50k (9.2 MB) | escapes_50k (14.8 MB) | wide_5k_200c (16.0 MB) | flat_100k (21.6 MB) | numbers_200k (25.9 MB) | flat_500k (109.5 MB) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Read file | 0.0273 | 0.0938 | 0.1523 | 0.1641 | 0.2227 | 0.2695 | 1.1289 |
-| Json_Parse (JSON to model) | 0.2695 | 1.5586 | 1.3203 | 2.2344 | 2.3672 | 4.3984 | 11.8789 |
-| Json_Stringify (model to JSON) | 0.2695 | 1.6719 | 1.4023 | 1.7266 | 2.5742 | 3.0430 | 12.9492 |
-| Upsert create (JSON to ListObject) | 0.3281 | 2.4727 | 2.0625 | 2.8828 | 3.4727 | 4.7383 | 18.2656 |
-| Upsert refresh | 0.3789 | 2.7422 | 2.3711 | 3.4844 | 3.9688 | 5.7305 | 20.3828 |
-| Export (ListObject to JSON) | 0.1328 | 3.5195 | 0.9609 | 0.8477 | 1.3945 | 1.1484 | 7.1094 |
+| Read file | 0.0273 | 0.0977 | 0.1602 | 0.1719 | 0.2266 | 0.2695 | 1.1367 |
+| Json_Parse (JSON to model) | 0.2383 | 1.5547 | 1.3242 | 2.2383 | 2.3672 | 4.3867 | 11.8320 |
+| Json_Stringify (model to JSON) | 0.2461 | 1.6563 | 1.3828 | 1.7227 | 2.5625 | 2.9727 | 12.8242 |
+| Upsert create (JSON to ListObject) | 0.3164 | 2.4492 | 2.0625 | 2.8828 | 3.3906 | 4.6719 | 17.6680 |
+| Upsert refresh | 0.3789 | 2.7070 | 2.3711 | 3.4805 | 3.9219 | 5.6563 | 20.1758 |
+| Export (ListObject to JSON) | 0.1211 | 3.4766 | 0.9414 | 0.7500 | 1.2617 | 0.9297 | 6.4297 |

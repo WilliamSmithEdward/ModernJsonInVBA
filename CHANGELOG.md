@@ -4,6 +4,22 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.1] - 2026-07-07
+
+### Performance
+
+- Table and range export is 10 to 19 percent faster (measured on 22 MB mixed
+  and 27 MB numeric exports). Two changes: integral cell numbers, which Excel
+  hands over as Double, print through the integer formatter instead of the
+  floating-point formatter, and the member separator is folded into each
+  column's cached key prefix, halving builder calls per cell. The integer
+  fast path also applies to `Json_Stringify` on integral Doubles. Output is
+  byte-identical: both benchmark exports were compared byte for byte before
+  and after.
+- `PERFORMANCE.md` and the README timing table are regenerated from the
+  current build, so the published numbers now include the row-schema cache,
+  nested-root streaming, and this release's export changes.
+
 ## [3.6.0] - 2026-07-07
 
 ### Changed
@@ -151,6 +167,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.6.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.1
 [3.6.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.0
 [3.5.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.5.0
 [3.4.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.4.0
