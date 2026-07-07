@@ -1719,6 +1719,24 @@ Public Sub Json_StringifyInto(ByRef sb As JsonTextBuilder, ByRef v As Variant)
     JsonW_WriteValue sb, v
 End Sub
 
+' Serialize a model value to indented ("pretty") JSON text. Objects and arrays
+' break across lines with one member or element per line; an empty object or
+' array stays on a single line ({} and []). indentUnit is the string repeated
+' once per nesting level: two spaces by default, or pass vbTab for tabs. Lines
+' end with a line feed (Chr 10).
+'
+' The model rules, escaping, number formatting, and error numbers are the same
+' as Json_Stringify; only the insignificant whitespace between tokens differs,
+' so the output parses back to an identical model.
+Public Function Json_StringifyPretty(ByVal v As Variant, Optional ByVal indentUnit As String = "  ") As String
+    Dim sb As JsonTextBuilder
+    JsonSB_Init sb, 512
+
+    JsonW_WriteValuePretty sb, v, 0, indentUnit
+
+    Json_StringifyPretty = JsonSB_Text(sb)
+End Function
+
 ' =============================================================================
 ' Writer internals
 ' =============================================================================
@@ -1989,6 +2007,230 @@ NextItem:
     Next entry
 
     Json_CollectionLooksLikeObject = False
+End Function
+
+' =============================================================================
+' Pretty (indented) writer internals
+'
+' Mirrors the compact writers above but breaks objects and arrays across lines.
+' A scalar has no line structure, so JsonW_WriteValuePretty forwards scalars to
+' the compact JsonW_WriteValue; that also keeps every error path (untagged
+' object-shaped Collection, VBA array, non-Collection object) in one place. The
+' compact hot path is left untouched: pretty output is for humans reading it,
+' not for bulk writes.
+' =============================================================================
+
+' Append one model value with indentation. depth is the current nesting level
+' (0 at the document root); indentUnit is repeated once per level.
+Private Sub JsonW_WriteValuePretty(ByRef sb As JsonTextBuilder, ByRef v As Variant, ByVal depth As Long, ByRef indentUnit As String)
+    If IsObject(v) Then
+        If TypeName(v) = "Collection" Then
+            If Json_IsObject(v) Then
+                JsonW_WriteObjectPretty sb, v, depth, indentUnit
+                Exit Sub
+            End If
+
+            ' Untagged Collection: an array, unless it looks like an object,
+            ' in which case the compact writer owns the 1134 raise.
+            Dim c As Collection
+            Set c = v
+            If Not Json_CollectionLooksLikeObject(c) Then
+                JsonW_WriteArrayPretty sb, c, depth, indentUnit
+                Exit Sub
+            End If
+        End If
+    End If
+
+    ' Scalars, non-Collection objects, and every error case: identical to the
+    ' compact writer. Such a value never spans more than one line.
+    JsonW_WriteValue sb, v
+End Sub
+
+Private Sub JsonW_WriteArrayPretty(ByRef sb As JsonTextBuilder, ByVal c As Collection, ByVal depth As Long, ByRef indentUnit As String)
+    ' An empty array stays on one line.
+    If c.count = 0 Then
+        JsonSB_Append sb, "[]"
+        Exit Sub
+    End If
+
+    Dim childPad As String
+    childPad = JsonW_Indent(indentUnit, depth + 1)
+
+    JsonSB_Append sb, "["
+    JsonSB_Append sb, vbLf
+
+    Dim first As Boolean
+    first = True
+
+    Dim item As Variant
+    For Each item In c
+        If first Then
+            first = False
+        Else
+            JsonSB_Append sb, ","
+            JsonSB_Append sb, vbLf
+        End If
+
+        JsonSB_Append sb, childPad
+        JsonW_WriteValuePretty sb, item, depth + 1, indentUnit
+    Next item
+
+    JsonSB_Append sb, vbLf
+    JsonSB_Append sb, JsonW_Indent(indentUnit, depth)
+    JsonSB_Append sb, "]"
+End Sub
+
+Private Sub JsonW_WriteObjectPretty(ByRef sb As JsonTextBuilder, ByVal obj As Collection, ByVal depth As Long, ByRef indentUnit As String)
+    Dim members As Collection
+    Set members = JsonW_ObjectMembers(obj)
+
+    ' An empty object stays on one line.
+    If members.count = 0 Then
+        JsonSB_Append sb, "{}"
+        Exit Sub
+    End If
+
+    Dim childPad As String
+    childPad = JsonW_Indent(indentUnit, depth + 1)
+
+    JsonSB_Append sb, "{"
+    JsonSB_Append sb, vbLf
+
+    Dim first As Boolean
+    first = True
+
+    Dim member As Variant
+    For Each member In members
+        If first Then
+            first = False
+        Else
+            JsonSB_Append sb, ","
+            JsonSB_Append sb, vbLf
+        End If
+
+        JsonSB_Append sb, childPad
+        JsonSB_Append sb, """"
+        JsonW_WriteEscaped sb, CStr(member(0))
+        JsonSB_Append sb, """: "
+
+        Dim val As Variant
+        Json_VarAssign val, member(1)
+        JsonW_WriteValuePretty sb, val, depth + 1, indentUnit
+    Next member
+
+    JsonSB_Append sb, vbLf
+    JsonSB_Append sb, JsonW_Indent(indentUnit, depth)
+    JsonSB_Append sb, "}"
+End Sub
+
+' Parse a tagged object's members into an ordered Collection of Array(key,
+' value), applying the same three pair shapes and the same error numbers as the
+' compact JsonW_WriteObject. The compact writer keeps its inline single-pass
+' walk because it is on the hot path; the pretty writer, which is not,
+' materializes the members so its line-breaking stays simple.
+Private Function JsonW_ObjectMembers(ByVal obj As Collection) As Collection
+    Dim result As Collection
+    Set result = New Collection
+
+    If obj Is Nothing Then
+        Err.Raise vbObjectError + 1134, Json_Serializer_ERR_SRC, _
+            "Json_StringifyObject: object is Nothing."
+    End If
+
+    If obj.count < 1 Or CStr(obj(1)) <> JSON_TAG_OBJECT Then
+        Err.Raise vbObjectError + 1134, Json_Serializer_ERR_SRC, _
+            "Json_StringifyObject: collection is not a tagged object."
+    End If
+
+    Dim isTag As Boolean
+    isTag = True
+
+    Dim pendingKey As String
+    Dim havePendingKey As Boolean
+    havePendingKey = False
+
+    Dim i As Long
+    i = 1
+
+    Dim entry As Variant
+    For Each entry In obj
+        If isTag Then
+            isTag = False
+        Else
+            i = i + 1
+
+            Dim keyStr As String
+            Dim val As Variant
+            Dim haveMember As Boolean
+            haveMember = False
+
+            If havePendingKey Then
+                keyStr = pendingKey
+                Json_VarAssign val, entry
+                havePendingKey = False
+                haveMember = True
+
+            ElseIf IsArray(entry) Then
+                Dim lb As Long
+                Dim ub As Long
+                lb = LBound(entry)
+                ub = UBound(entry)
+
+                If (ub - lb + 1) < 2 Then
+                    Err.Raise vbObjectError + 1136, Json_Serializer_ERR_SRC, _
+                        "Json_StringifyObject: object pair at index " & CStr(i) & _
+                        " must contain 2 elements (key,value)."
+                End If
+
+                keyStr = CStr(entry(lb))
+                Json_VarAssign val, entry(lb + 1)
+                haveMember = True
+
+            ElseIf IsObject(entry) And TypeName(entry) = "Collection" Then
+                If entry.count < 2 Then
+                    Err.Raise vbObjectError + 1136, Json_Serializer_ERR_SRC, _
+                        "Json_StringifyObject: object pair Collection at index " & CStr(i) & _
+                        " must contain 2 elements (key,value)."
+                End If
+
+                keyStr = CStr(entry(1))
+                Json_VarAssign val, entry(2)
+                haveMember = True
+
+            ElseIf VarType(entry) = vbString Then
+                pendingKey = CStr(entry)
+                havePendingKey = True
+
+            Else
+                Err.Raise vbObjectError + 1135, Json_Serializer_ERR_SRC, _
+                    "Json_StringifyObject: object entry at index " & CStr(i) & _
+                    " is not Array(key,value) or Collection(key,value) or String(key). Found type=" & TypeName(entry)
+            End If
+
+            If haveMember Then
+                result.Add Array(keyStr, val)
+            End If
+        End If
+    Next entry
+
+    If havePendingKey Then
+        Err.Raise vbObjectError + 1136, Json_Serializer_ERR_SRC, _
+            "Json_StringifyObject: dangling key at final index " & CStr(i) & _
+            " (missing value)."
+    End If
+
+    Set JsonW_ObjectMembers = result
+End Function
+
+' Return indentUnit repeated depth times. depth equals the nesting level, which
+' is small in practice, so the loop is not a concern.
+Private Function JsonW_Indent(ByRef indentUnit As String, ByVal depth As Long) As String
+    Dim s As String
+    Dim k As Long
+    For k = 1 To depth
+        s = s & indentUnit
+    Next k
+    JsonW_Indent = s
 End Function
 
 ' =============================================================================

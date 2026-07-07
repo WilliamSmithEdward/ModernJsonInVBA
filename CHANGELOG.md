@@ -4,6 +4,18 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-07-07
+
+### Added
+
+- `Json_StringifyPretty`: serialize the model to indented ("pretty") JSON text,
+  one member or element per line, with empty objects and arrays kept inline as
+  `{}` and `[]`. The indent unit defaults to two spaces and can be any string
+  (pass `vbTab` for tabs). Escaping, number formatting, and error numbers match
+  `Json_Stringify`, so the output parses back to an identical model. The compact
+  `Json_Stringify` is unchanged. Host-agnostic, so it is in both single-file
+  builds.
+
 ## [3.2.0] - 2026-07-06
 
 ### Added
@@ -89,6 +101,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.3.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.3.0
 [3.2.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.2.0
 [3.1.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.1.0
 [3.0.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.0.0

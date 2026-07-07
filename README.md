@@ -810,7 +810,10 @@ Errors protect against:
   Parses JSON text into an output `Variant` passed by reference.
 
 - `Public Function Json_Stringify(ByVal v As Variant) As String`  
-  Serializes the in-memory JSON model back into deterministic JSON text.
+  Serializes the in-memory JSON model back into deterministic JSON text (compact, single line).
+
+- `Public Function Json_StringifyPretty(ByVal v As Variant, Optional ByVal indentUnit As String = "  ") As String`  
+  Serializes the model into indented ("pretty") JSON text, one member or element per line. `indentUnit` is repeated once per nesting level (two spaces by default; pass `vbTab` for tabs). Empty objects and arrays stay inline as `{}` and `[]`. The escaping, number formatting, and error contract match `Json_Stringify`, so the output parses back to an identical model.
 
 ## JSON Type / Object Helpers
 
