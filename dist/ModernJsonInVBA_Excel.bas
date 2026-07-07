@@ -5609,8 +5609,14 @@ End Function
 ' Excel -> JSON export: the reverse direction of Json_Excel's ingestion.
 '
 '   Excel_ListObjectToJson       table -> JSON array-of-objects
+'   Excel_RangeToJson            range -> JSON array-of-objects
 '   Excel_RangeToJsonStrings     range -> Collection of JSON strings
 '   Json_CoalesceArraysFromRange merge JSON arrays stored in a range
+'
+' Excel_ListObjectToJson and Excel_RangeToJson share one engine
+' (Excel_TableToJson); they differ only in where headers and body come from.
+' Excel_RangeToJsonStrings is a separate, unrelated helper (it collects cell
+' text for the coalesce functions, not a table export).
 '
 ' Performance notes:
 '   - Header paths are analyzed once per column (tokenize, bracket check,
@@ -5619,15 +5625,15 @@ End Function
 '     guarantees key uniqueness within a row, so the append is equivalent to
 '     Json_ObjSet without its per-pair scan.
 '
-' Error numbers (all vbObjectError + n, source "Excel_ListObjectToJson"):
+' Error numbers (all vbObjectError + n):
 '   905  bracketed (array index) header path
 '   1120 blank header            1121 duplicate header
 '   1170 Excel error value       1171 body/header column mismatch
-'   1172 TAG_OBJECT missing
+'   1172 TAG_OBJECT missing      1173 Range is Nothing
 ' =============================================================================
 
 ' Convert a ListObject into a JSON array-of-objects. Each row becomes one
-' object; headers define the property paths.
+' object; the column headers define the property paths.
 '
 ' Value precedence per cell:
 '   1. JSON parsed from cell text  (parseJsonInCells=True and it parses)
@@ -5647,11 +5653,6 @@ Public Function Excel_ListObjectToJson( _
 
     Const SRC As String = "Excel_ListObjectToJson"
 
-    If Len(JSON_TAG_OBJECT) = 0 Then
-        Err.Raise vbObjectError + 1172, SRC, "TAG_OBJECT is blank or not initialized."
-    End If
-
-    ' ---- Headers ----
     Dim colCount As Long
     colCount = lo.ListColumns.count
 
@@ -5661,8 +5662,139 @@ Public Function Excel_ListObjectToJson( _
     Dim c As Long
     For c = 1 To colCount
         headers(c) = Trim$(CStr(lo.ListColumns(c).name))
+    Next c
+
+    Dim hasBody As Boolean
+    hasBody = Not (lo.DataBodyRange Is Nothing)
+
+    Dim data As Variant
+    Dim formulas As Variant
+    If hasBody Then
+        data = lo.DataBodyRange.Value2
+        If preserveFormulas Then formulas = lo.DataBodyRange.Formula
+    End If
+
+    Excel_ListObjectToJson = Excel_TableToJson(headers, colCount, hasBody, _
+        data, formulas, preserveFormulas, includeBlanksAsNull, _
+        parseJsonInCells, parseArraysOnly, SRC)
+End Function
+
+' Convert a worksheet range into a JSON array-of-objects, the same way
+' Excel_ListObjectToJson converts a table. Use this when data lives in a
+' plain range rather than a formal ListObject.
+'
+' hasHeaderRow:
+'   True  (default) the first row supplies the property names.
+'   False           there is no header row; columns are named Column1,
+'                   Column2, ... and every row is data.
+'
+' Pass a single contiguous range (Value2 reads only the first area of a
+' multi-area range). Dates come through as Value2 serial numbers, the same as
+' Excel_ListObjectToJson. Header-only ranges (or empty single cells with
+' hasHeaderRow) return "[]". The remaining options match
+' Excel_ListObjectToJson.
+Public Function Excel_RangeToJson( _
+    ByVal rng As Range, _
+    Optional ByVal hasHeaderRow As Boolean = True, _
+    Optional ByVal includeBlanksAsNull As Boolean = False, _
+    Optional ByVal parseJsonInCells As Boolean = False, _
+    Optional ByVal parseArraysOnly As Boolean = False, _
+    Optional ByVal preserveFormulas As Boolean = False _
+) As String
+
+    Const SRC As String = "Excel_RangeToJson"
+
+    If rng Is Nothing Then
+        Err.Raise vbObjectError + 1173, SRC, "Range is Nothing."
+    End If
+
+    Dim colCount As Long
+    Dim totalRows As Long
+    colCount = rng.Columns.count
+    totalRows = rng.rows.count
+
+    ' ---- Headers ----
+    Dim headers() As String
+    If colCount > 0 Then ReDim headers(1 To colCount)
+
+    Dim c As Long
+    Dim headerRows As Long
+
+    If hasHeaderRow Then
+        headerRows = 1
+
+        Dim hdr As Variant
+        hdr = rng.rows(1).Value2
+
+        If Not IsArray(hdr) Then
+            ' Single-column header row reads back as a scalar.
+            headers(1) = Trim$(CStr(hdr))
+        Else
+            Dim hLo As Long
+            hLo = LBound(hdr, 2)
+            For c = 1 To colCount
+                headers(c) = Trim$(CStr(hdr(LBound(hdr, 1), hLo + c - 1)))
+            Next c
+        End If
+    Else
+        headerRows = 0
+        For c = 1 To colCount
+            headers(c) = "Column" & c
+        Next c
+    End If
+
+    ' ---- Body ----
+    Dim bodyRows As Long
+    bodyRows = totalRows - headerRows
+
+    Dim hasBody As Boolean
+    hasBody = (bodyRows > 0)
+
+    Dim data As Variant
+    Dim formulas As Variant
+    If hasBody Then
+        Dim bodyRng As Range
+        Set bodyRng = rng.Offset(headerRows, 0).Resize(bodyRows, colCount)
+        data = bodyRng.Value2
+        If preserveFormulas Then formulas = bodyRng.Formula
+    End If
+
+    Excel_RangeToJson = Excel_TableToJson(headers, colCount, hasBody, _
+        data, formulas, preserveFormulas, includeBlanksAsNull, _
+        parseJsonInCells, parseArraysOnly, SRC)
+End Function
+
+' =============================================================================
+' Shared engine: headers + body -> JSON array-of-objects
+' =============================================================================
+
+' Serialize an already-extracted header list and body into JSON. headers()
+' is 1-based with colCount entries; hasBody=False means no data rows (returns
+' "[]" after header validation). data and formulas are the raw Value2 /
+' Formula reads (scalar for a 1x1 body, normalized here). errSource names the
+' calling function for raised errors.
+Private Function Excel_TableToJson( _
+    ByRef headers() As String, _
+    ByVal colCount As Long, _
+    ByVal hasBody As Boolean, _
+    ByRef data As Variant, _
+    ByRef formulas As Variant, _
+    ByVal preserveFormulas As Boolean, _
+    ByVal includeBlanksAsNull As Boolean, _
+    ByVal parseJsonInCells As Boolean, _
+    ByVal parseArraysOnly As Boolean, _
+    ByVal errSource As String _
+) As String
+
+    If Len(JSON_TAG_OBJECT) = 0 Then
+        Err.Raise vbObjectError + 1172, errSource, "TAG_OBJECT is blank or not initialized."
+    End If
+
+    ' ---- Validate headers (blank, then duplicate) ----
+    Dim c As Long
+    For c = 1 To colCount
         If Len(headers(c)) = 0 Then
-            Err.Raise vbObjectError + 1120, SRC, _
+            Err.Raise vbObjectError + 1120, errSource, _
                 "Header at index " & CStr(c) & " is blank."
         End If
     Next c
@@ -5674,7 +5806,7 @@ Public Function Excel_ListObjectToJson( _
         Dim seenAt As Long
         seenAt = JsonIdx_Find(dupIdx, headers(c))
         If seenAt > 0 Then
-            Err.Raise vbObjectError + 1121, SRC, _
+            Err.Raise vbObjectError + 1121, errSource, _
                 "Duplicate header: '" & headers(seenAt) & _
                 "' at indices " & seenAt & " and " & c
         End If
@@ -5697,7 +5829,7 @@ Public Function Excel_ListObjectToJson( _
         keyPath = headers(c)
 
         If InStr(keyPath, "[") > 0 Or InStr(keyPath, "]") > 0 Then
-            Err.Raise vbObjectError + 905, SRC, _
+            Err.Raise vbObjectError + 905, errSource, _
                 "Array index paths unsupported: " & keyPath
         End If
 
@@ -5718,21 +5850,12 @@ Public Function Excel_ListObjectToJson( _
         End If
     Next c
 
-    If lo.DataBodyRange Is Nothing Then
-        Excel_ListObjectToJson = "[]"
+    If Not hasBody Then
+        Excel_TableToJson = "[]"
         Exit Function
     End If
 
-    ' ---- Bulk read ----
-    Dim data As Variant
-    data = lo.DataBodyRange.Value2
-
-    Dim formulas As Variant
-    If preserveFormulas Then
-        formulas = lo.DataBodyRange.Formula
-    End If
-
-    ' A 1x1 body reads back as a scalar; normalize to a 2D array.
+    ' ---- Normalize a 1x1 scalar body to a 2D array ----
     If Not IsArray(data) Then
         Dim tmp(1 To 1, 1 To 1) As Variant
         tmp(1, 1) = data
@@ -5754,8 +5877,8 @@ Public Function Excel_ListObjectToJson( _
     dataCols = UBound(data, 2) - LBound(data, 2) + 1
 
     If dataCols <> colCount Then
-        Err.Raise vbObjectError + 1171, SRC, _
-            "DataBodyRange columns (" & dataCols & _
+        Err.Raise vbObjectError + 1171, errSource, _
+            "Body columns (" & dataCols & _
             ") do not match header count (" & colCount & ")."
     End If
 
@@ -5813,7 +5936,7 @@ Public Function Excel_ListObjectToJson( _
                     v = data(rowBase + r, colBase + c)
 
                     If IsError(v) Then
-                        Err.Raise vbObjectError + 1170, SRC, _
+                        Err.Raise vbObjectError + 1170, errSource, _
                             "Excel error value at row " & r & ", col " & c
                     End If
 
@@ -5842,7 +5965,7 @@ NextPlainCell:
 
             JsonSB_Append out, "]"
 
-            Excel_ListObjectToJson = JsonSB_Text(out)
+            Excel_TableToJson = JsonSB_Text(out)
             Exit Function
         End If
 
@@ -5854,7 +5977,7 @@ NextPlainCell:
 
             For c = 1 To colCount
                 isBlank = Excel_ResolveCellValue(data, formulas, r, c, _
-                    parseJsonInCells, parseArraysOnly, preserveFormulas, SRC, v)
+                    parseJsonInCells, parseArraysOnly, preserveFormulas, errSource, v)
 
                 If isBlank Then
                     If Not includeBlanksAsNull Then GoTo NextStreamCell
@@ -5875,7 +5998,7 @@ NextStreamCell:
 
         JsonSB_Append out, "]"
 
-        Excel_ListObjectToJson = JsonSB_Text(out)
+        Excel_TableToJson = JsonSB_Text(out)
         Exit Function
     End If
 
@@ -5892,7 +6015,7 @@ NextStreamCell:
 
         For c = 1 To colCount
             isBlank = Excel_ResolveCellValue(data, formulas, r, c, _
-                parseJsonInCells, parseArraysOnly, preserveFormulas, SRC, v)
+                parseJsonInCells, parseArraysOnly, preserveFormulas, errSource, v)
 
             If isBlank Then
                 If Not includeBlanksAsNull Then GoTo NextCell
@@ -5915,7 +6038,7 @@ NextCell:
         arr.Add rowObj
     Next r
 
-    Excel_ListObjectToJson = Json_Stringify(arr)
+    Excel_TableToJson = Json_Stringify(arr)
 End Function
 
 ' Resolve one cell to its export value, applying the documented precedence:
@@ -6025,7 +6148,7 @@ Fail:
 End Function
 
 ' =============================================================================
-' Ranges of JSON strings
+' Ranges of JSON strings (unrelated to the table export above)
 ' =============================================================================
 
 ' Merge JSON arrays stored in a range into a single array. Empty cells are

@@ -4,6 +4,17 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-07-06
+
+### Added
+
+- `Excel_RangeToJson`: convert a worksheet range to a JSON array-of-objects,
+  the same way `Excel_ListObjectToJson` converts a table. The first row
+  supplies the property names unless `hasHeaderRow` is False, in which case
+  columns are named Column1, Column2, and so on. It shares the export engine
+  with `Excel_ListObjectToJson`, so a range holding the same data produces
+  identical JSON. Available in the workbook and the Excel single-file build.
+
 ## [3.0.0] - 2026-07-05
 
 This release reorganizes the library into eleven modules split by concern and
@@ -67,4 +78,5 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.1.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.1.0
 [3.0.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.0.0

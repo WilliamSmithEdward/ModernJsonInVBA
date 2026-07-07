@@ -685,6 +685,23 @@ Produces:
 ]
 ```
 
+### From a plain range
+
+`Excel_RangeToJson` runs the same conversion on a plain range rather than a
+formal ListObject. By default the first row supplies the property names:
+
+```vb
+' A1:C4 holds the same header row and data as the table above
+jsonText = Excel_RangeToJson(ws.Range("A1:C4"))
+```
+
+A range holding the same data produces byte-identical JSON to the table
+version. Pass `hasHeaderRow:=False` when the range has no header row; columns
+are then named `Column1`, `Column2`, and so on. The remaining options
+(`includeBlanksAsNull`, `parseJsonInCells`, `parseArraysOnly`,
+`preserveFormulas`) match `Excel_ListObjectToJson`. A header-only range
+returns `[]`.
+
 ### Determinism Guarantees
 
 - No silent type coercion
@@ -865,6 +882,9 @@ Errors protect against:
 
 - `Public Function Excel_ListObjectToJson(ByVal lo As ListObject, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
   Converts an Excel table into a JSON array-of-objects. Supports nested dot-path headers and optional parsing of JSON text stored inside cells.
+
+- `Public Function Excel_RangeToJson(ByVal rng As Range, Optional ByVal hasHeaderRow As Boolean = True, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
+  Converts a worksheet range into a JSON array-of-objects, the same way `Excel_ListObjectToJson` handles a table. The first row supplies headers unless `hasHeaderRow` is False, in which case columns are named `Column1`, `Column2`, and so on.
 
 - `Public Sub Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
   Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline.
