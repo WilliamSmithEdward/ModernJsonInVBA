@@ -99,9 +99,10 @@ End Function
 ' Public API: upsert from headers + 2D data
 ' =============================================================================
 
-' Create-or-update the named table with the given headers and 2D data.
-' See Excel_ListObjectUpsertData for the schema-evolution semantics.
-Public Sub Excel_UpsertListObjectOnSheet( _
+' Create-or-update the named table with the given headers and 2D data, and
+' return the created or updated ListObject. See Excel_ListObjectUpsertData for
+' the schema-evolution semantics.
+Public Function Excel_UpsertListObjectOnSheet( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
@@ -112,7 +113,7 @@ Public Sub Excel_UpsertListObjectOnSheet( _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True _
-)
+) As ListObject
     Dim lo As ListObject
     Set lo = Excel_GetListObject(ws, tableName)
 
@@ -123,7 +124,9 @@ Public Sub Excel_UpsertListObjectOnSheet( _
     Excel_ListObjectUpsertData lo, headers, data2D, _
         clearExisting, addMissingColumns, removeMissingColumns, _
         preserveFormulaColumns, fillFormulasOnAppend
-End Sub
+
+    Set Excel_UpsertListObjectOnSheet = lo
+End Function
 
 ' Core upsert. Resolves the final schema from the incoming headers and the
 ' existing table:
@@ -525,12 +528,13 @@ End Sub
 ' Parse jsonText, resolve tableRoot to an array-of-objects (or null), and
 ' upsert the rows into the named table. Rows are filled into a single 2D
 ' array directly from the parsed model (no intermediate flatten of the
-' document) and written in one pipeline pass.
+' document) and written in one pipeline pass. Returns the created or updated
+' ListObject.
 '
 ' nonTableArraysAsJson:
 '   False => nested arrays inside rows are excluded (prevents explosion)
 '   True  => nested arrays are stored as JSON text in their cell
-Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
+Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
@@ -542,7 +546,7 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
     Optional ByVal nonTableArraysAsJson As Boolean = False _
-)
+) As ListObject
     Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
     On Error GoTo Fail
@@ -670,22 +674,24 @@ Public Sub Excel_UpsertListObjectFromJsonAtRoot( _
         Dim emptyData As Variant
         emptyData = Empty
 
-        Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+        Set Excel_UpsertListObjectFromJsonAtRoot = Excel_UpsertListObjectOnSheet( _
+            ws, tableName, topLeft, _
             headersOut, emptyData, _
             clearExisting, addMissingColumns, removeMissingColumns, _
-            preserveFormulaColumns, fillFormulasOnAppend
+            preserveFormulaColumns, fillFormulasOnAppend)
 
-        Exit Sub
+        Exit Function
     End If
 
     ' One pipeline pass: one schema resolution, one resize, one body write.
-    Excel_UpsertListObjectOnSheet ws, tableName, topLeft, _
+    Set Excel_UpsertListObjectFromJsonAtRoot = Excel_UpsertListObjectOnSheet( _
+        ws, tableName, topLeft, _
         headersOut, data, _
         clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend
+        preserveFormulaColumns, fillFormulasOnAppend)
 
     Erase data
-    Exit Sub
+    Exit Function
 
 Fail:
     ' Re-raise from this source, keeping the inner source in the message so
@@ -704,7 +710,7 @@ Fail:
     End If
 
     Err.Raise n, SRC, d
-End Sub
+End Function
 
 ' =============================================================================
 ' Public API: unified source ingestion (JSON / CSV / XML)
@@ -719,8 +725,9 @@ End Sub
 '                           (commonly "$.item")
 '
 ' All determinism and schema-evolution behavior comes from the JSON
-' pipeline; this function is routing only.
-Public Sub Excel_UpsertListObjectFromSource( _
+' pipeline; this function is routing only. It returns the ListObject the
+' pipeline produced.
+Public Function Excel_UpsertListObjectFromSource( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
@@ -733,7 +740,7 @@ Public Sub Excel_UpsertListObjectFromSource( _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
     Optional ByVal nonTableArraysAsJson As Boolean = False _
-)
+) As ListObject
     Const ERR_SRC As String = "Excel_UpsertListObjectFromSource"
 
     Dim jsonText As String
@@ -756,11 +763,11 @@ Public Sub Excel_UpsertListObjectFromSource( _
             Err.Raise vbObjectError + 1400, ERR_SRC, "Unsupported source format."
     End Select
 
-    Excel_UpsertListObjectFromJsonAtRoot _
+    Set Excel_UpsertListObjectFromSource = Excel_UpsertListObjectFromJsonAtRoot( _
         ws, tableName, topLeft, jsonText, resolvedRoot, _
         clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend, nonTableArraysAsJson
-End Sub
+        preserveFormulaColumns, fillFormulasOnAppend, nonTableArraysAsJson)
+End Function
 
 ' =============================================================================
 ' Formula preservation

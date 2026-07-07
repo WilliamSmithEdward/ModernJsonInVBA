@@ -4,6 +4,20 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-07-07
+
+### Changed
+
+- The three ListObject upsert entry points return the table they created or
+  updated: `Excel_UpsertListObjectOnSheet`,
+  `Excel_UpsertListObjectFromJsonAtRoot`, and `Excel_UpsertListObjectFromSource`
+  are now `Function ... As ListObject` instead of `Sub`. The returned reference
+  lets a caller style, read, or extend the table without a second
+  `ws.ListObjects(name)` lookup, matching how `Excel_EnsureListObject` and
+  Excel's own `ListObjects.Add` return what they create. Backward compatible: a
+  `Function` can be called as a statement, so existing calls that ignore the
+  return keep compiling, and the error numbers are unchanged.
+
 ## [3.4.0] - 2026-07-07
 
 ### Added
@@ -114,6 +128,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.5.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.5.0
 [3.4.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.4.0
 [3.3.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.3.0
 [3.2.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.2.0

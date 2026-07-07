@@ -877,14 +877,14 @@ Errors protect against:
 - `Public Function Excel_EnsureListObject(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant) As ListObject`  
   Ensures a table exists. Creates it if missing using the supplied header list and top-left anchor.
 
-- `Public Sub Excel_UpsertListObjectOnSheet(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, ByVal data2D As Variant, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True)`  
-  Core Excel upsert entry point for writing headers and a 2D array into a `ListObject`, with schema evolution and formula-preservation options.
+- `Public Function Excel_UpsertListObjectOnSheet(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, ByVal data2D As Variant, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True) As ListObject`  
+  Core Excel upsert entry point for writing headers and a 2D array into a `ListObject`, with schema evolution and formula-preservation options. Returns the created or updated `ListObject`.
 
 - `Public Sub Excel_ResizeTableToRowCol(ByVal lo As ListObject, ByVal finalHeaders As Variant, ByVal bodyRowCount As Long)`  
   Resizes a `ListObject` to the requested header/body shape while handling Excel table materialization edge cases.
 
-- `Public Sub Excel_UpsertListObjectFromJsonAtRoot(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal jsonText As String, ByVal tableRoot As String, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
-  High-level JSON-to-table ingestion entry point. Parses JSON, resolves a root array-of-objects, shapes rows and headers, then upserts into Excel.
+- `Public Function Excel_UpsertListObjectFromJsonAtRoot(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal jsonText As String, ByVal tableRoot As String, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False) As ListObject`  
+  High-level JSON-to-table ingestion entry point. Parses JSON, resolves a root array-of-objects, shapes rows and headers, then upserts into Excel. Returns the created or updated `ListObject`.
 
 - `Public Function Excel_ListObjectToJson(ByVal lo As ListObject, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
   Converts an Excel table into a JSON array-of-objects. Supports nested dot-path headers and optional parsing of JSON text stored inside cells.
@@ -892,8 +892,8 @@ Errors protect against:
 - `Public Function Excel_RangeToJson(ByVal rng As Range, Optional ByVal hasHeaderRow As Boolean = True, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
   Converts a worksheet range into a JSON array-of-objects, the same way `Excel_ListObjectToJson` handles a table. The first row supplies headers unless `hasHeaderRow` is False, in which case columns are named `Column1`, `Column2`, and so on.
 
-- `Public Sub Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
-  Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline.
+- `Public Function Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False) As ListObject`  
+  Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline. Returns the created or updated `ListObject`.
 
 ### CSV / XML / NDJSON Adapters
 
