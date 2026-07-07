@@ -4,6 +4,17 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-07-06
+
+### Added
+
+- `NdjsonToJson` and `NdjsonFileToJson`: convert NDJSON (newline-delimited
+  JSON, also called JSON Lines) into the library's JSON array. Each line
+  becomes one record, so the result feeds straight into `Json_Parse` or the
+  table upsert (one line to a row). Line endings `\n`, `\r\n`, and `\r` are
+  accepted and blank lines are skipped. Host-agnostic, so it is in both
+  single-file builds.
+
 ## [3.1.0] - 2026-07-06
 
 ### Added
@@ -78,5 +89,6 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.2.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.2.0
 [3.1.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.1.0
 [3.0.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.0.0

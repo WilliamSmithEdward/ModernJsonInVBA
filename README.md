@@ -889,7 +889,7 @@ Errors protect against:
 - `Public Sub Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False)`  
   Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline.
 
-### CSV / XML Adapters
+### CSV / XML / NDJSON Adapters
 
 - `Public Function CsvFileToJson(ByVal filePath As String) As String`  
   Reads a CSV file from disk and converts it into a JSON array-of-objects.
@@ -902,6 +902,12 @@ Errors protect against:
 
 - `Public Function XmlTextToJson(ByVal txt As String) As String`  
   Converts raw XML text into JSON using the library's lightweight pure-VBA XML parser.
+
+- `Public Function NdjsonFileToJson(ByVal filePath As String) As String`  
+  Reads an NDJSON (newline-delimited JSON / JSON Lines) file from disk and converts it into a JSON array.
+
+- `Public Function NdjsonToJson(ByVal txt As String) As String`  
+  Converts NDJSON text (one JSON value per line) into a JSON array string, so each line becomes one record. Feeds straight into `Json_Parse` or the table upsert (`Excel_UpsertListObjectFromJsonAtRoot(ws, name, cell, NdjsonToJson(text), "$")`). Accepts `\n`, `\r\n`, and `\r`; blank lines are skipped.
 
 ### JSON Coalescing Utilities
 

@@ -38,6 +38,7 @@ DIST = os.path.join(REPO, "dist")
 ALL_O365_MODULES = [
     "Json_Common", "Json_Parser", "Json_Serializer", "Json_Model",
     "Json_Transforms", "Json_Tables", "Json_Coalesce", "Json_Csv", "Json_Xml",
+    "Json_Ndjson",
 ]
 EXCEL_MODULES = ALL_O365_MODULES + ["Json_Excel", "Json_Excel_Export"]
 
