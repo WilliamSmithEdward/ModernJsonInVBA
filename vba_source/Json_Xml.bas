@@ -39,17 +39,11 @@ Option Explicit
 
 Private Const ERR_SRC As String = "XmlTextToJson"
 
-' Read an XML file and convert it via XmlTextToJson.
+' Read an XML file and convert it via XmlTextToJson. The file is read through
+' Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and legacy ANSI
+' files all decode correctly.
 Public Function XmlFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    XmlFileToJson = XmlTextToJson(txt)
+    XmlFileToJson = XmlTextToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert raw XML text into JSON text.

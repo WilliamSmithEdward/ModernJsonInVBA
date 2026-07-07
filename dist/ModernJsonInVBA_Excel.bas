@@ -172,7 +172,9 @@ Private Const Json_Tables_ERR_SRC As String = "ModernJsonInVBA"
 ' ---- Json_Xml ----
 Private Const Json_Xml_ERR_SRC As String = "XmlTextToJson"
 
-' Read an XML file and convert it via XmlTextToJson.
+' Read an XML file and convert it via XmlTextToJson. The file is read through
+' Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and legacy ANSI
+' files all decode correctly.
 
 ' ---- Json_Excel ----
 Private Const EXCEL_FALLBACK_BLOCK_CELLS As Long = 1000000
@@ -610,6 +612,242 @@ Public Function Json_RemoveIndices(ByVal s As String) As String
     End If
 
     Json_RemoveIndices = JsonSB_Text(sb)
+End Function
+
+' =============================================================================
+' Text file reading
+' =============================================================================
+
+' Read a text file into a VBA string, detecting the encoding from the bytes:
+'
+'   UTF-16 LE BOM (FF FE)   decoded as UTF-16 LE, BOM stripped
+'   UTF-16 BE BOM (FE FF)   decoded as UTF-16 BE, BOM stripped
+'   UTF-8 BOM (EF BB BF)    BOM stripped, then the no-BOM rule below
+'   no BOM, valid UTF-8     decoded as UTF-8 (JSON's encoding per RFC 8259)
+'   no BOM, invalid UTF-8   converted through the system ANSI codepage, the
+'                           legacy behavior, so old ANSI exports keep working
+'
+' A pure 7-bit ASCII file (the overwhelming majority) converts with a single
+' StrConv call, so the common case costs one scan and one native conversion.
+' The UTF-8 decoder is pure VBA with no Declare statements, so this works on
+' every VBA host, Mac included.
+Public Function Json_ReadTextFile(ByVal filePath As String) As String
+    Dim f As Integer
+    f = FreeFile
+
+    Dim size As Long
+    Dim b() As Byte
+
+    Open filePath For Binary Access Read As #f
+    size = LOF(f)
+    If size > 0 Then
+        ReDim b(0 To size - 1) As Byte
+        Get #f, 1, b
+    End If
+    Close #f
+
+    If size = 0 Then Exit Function
+
+    ' UTF-16 BOMs decide immediately.
+    If size >= 2 Then
+        If b(0) = &HFF And b(1) = &HFE Then
+            Json_ReadTextFile = Json_BytesToUtf16(b, 2, False)
+            Exit Function
+        End If
+        If b(0) = &HFE And b(1) = &HFF Then
+            Json_ReadTextFile = Json_BytesToUtf16(b, 2, True)
+            Exit Function
+        End If
+    End If
+
+    Dim start As Long
+    If size >= 3 Then
+        If b(0) = &HEF And b(1) = &HBB And b(2) = &HBF Then start = 3
+    End If
+
+    ' ASCII probe: with no byte >= 0x80, UTF-8 and ANSI agree, and StrConv
+    ' does the whole conversion natively.
+    Dim hasHigh As Boolean
+    Dim i As Long
+    For i = start To size - 1
+        If b(i) >= &H80 Then
+            hasHigh = True
+            Exit For
+        End If
+    Next i
+
+    If Not hasHigh Then
+        Json_ReadTextFile = StrConv(Json_BytesFrom(b, start), vbUnicode)
+        Exit Function
+    End If
+
+    Dim decoded As String
+    If Json_TryDecodeUtf8(b, start, decoded) Then
+        Json_ReadTextFile = decoded
+    Else
+        Json_ReadTextFile = StrConv(Json_BytesFrom(b, start), vbUnicode)
+    End If
+End Function
+
+' Return b(start..end) as its own array (b itself when start = 0).
+Private Function Json_BytesFrom(ByRef b() As Byte, ByVal start As Long) As Byte()
+    If start = 0 Then
+        Json_BytesFrom = b
+        Exit Function
+    End If
+
+    Dim rest() As Byte
+    ReDim rest(0 To UBound(b) - start) As Byte
+
+    Dim i As Long
+    For i = start To UBound(b)
+        rest(i - start) = b(i)
+    Next i
+
+    Json_BytesFrom = rest
+End Function
+
+' Reinterpret the bytes from offset start as UTF-16 code units. A VBA string
+' is UTF-16 LE, so the little-endian case is a direct assignment; big-endian
+' swaps each pair. An odd trailing byte is dropped.
+Private Function Json_BytesToUtf16(ByRef b() As Byte, ByVal start As Long, ByVal bigEndian As Boolean) As String
+    Dim byteCount As Long
+    byteCount = (UBound(b) + 1 - start)
+    byteCount = byteCount - (byteCount Mod 2)
+    If byteCount <= 0 Then Exit Function
+
+    Dim o() As Byte
+    ReDim o(0 To byteCount - 1) As Byte
+
+    Dim i As Long
+    If bigEndian Then
+        For i = 0 To byteCount - 1 Step 2
+            o(i) = b(start + i + 1)
+            o(i + 1) = b(start + i)
+        Next i
+    Else
+        For i = 0 To byteCount - 1
+            o(i) = b(start + i)
+        Next i
+    End If
+
+    Json_BytesToUtf16 = o
+End Function
+
+' Strict UTF-8 decode of b(start..) into outText. Returns False on any
+' invalid sequence: overlong encodings, surrogate code points, code points
+' past U+10FFFF, stray continuation bytes, and truncated sequences all
+' reject, so ANSI text does not silently half-decode. Output is built as a
+' UTF-16 LE byte buffer and assigned to the string in one step.
+Private Function Json_TryDecodeUtf8(ByRef b() As Byte, ByVal start As Long, ByRef outText As String) As Boolean
+    Json_TryDecodeUtf8 = False
+
+    Dim n As Long
+    n = UBound(b) + 1
+
+    ' Worst case is ASCII: one UTF-16 unit (2 bytes) per input byte.
+    Dim o() As Byte
+    ReDim o(0 To (n - start) * 2 + 1) As Byte
+
+    Dim wp As Long
+    Dim i As Long
+    i = start
+
+    Dim c As Long
+    Dim c2 As Long
+    Dim c3 As Long
+    Dim c4 As Long
+    Dim cp As Long
+
+    Do While i < n
+        c = b(i)
+
+        If c < &H80 Then
+            o(wp) = c
+            o(wp + 1) = 0
+            wp = wp + 2
+            i = i + 1
+
+        ElseIf c >= &HC2 And c <= &HDF Then     ' two bytes (C0/C1 = overlong)
+            If i + 1 >= n Then Exit Function
+            c2 = b(i + 1)
+            If c2 < &H80 Or c2 > &HBF Then Exit Function
+
+            cp = (c And &H1F) * 64& + (c2 And &H3F)
+            o(wp) = cp And &HFF
+            o(wp + 1) = cp \ 256
+            wp = wp + 2
+            i = i + 2
+
+        ElseIf c >= &HE0 And c <= &HEF Then     ' three bytes
+            If i + 2 >= n Then Exit Function
+            c2 = b(i + 1)
+            c3 = b(i + 2)
+
+            ' E0 forbids overlong (second byte A0..BF); ED forbids
+            ' surrogates (second byte 80..9F).
+            If c = &HE0 Then
+                If c2 < &HA0 Or c2 > &HBF Then Exit Function
+            ElseIf c = &HED Then
+                If c2 < &H80 Or c2 > &H9F Then Exit Function
+            Else
+                If c2 < &H80 Or c2 > &HBF Then Exit Function
+            End If
+            If c3 < &H80 Or c3 > &HBF Then Exit Function
+
+            cp = (c And &HF) * 4096& + (c2 And &H3F) * 64& + (c3 And &H3F)
+            o(wp) = cp And &HFF
+            o(wp + 1) = cp \ 256
+            wp = wp + 2
+            i = i + 3
+
+        ElseIf c >= &HF0 And c <= &HF4 Then     ' four bytes -> surrogate pair
+            If i + 3 >= n Then Exit Function
+            c2 = b(i + 1)
+            c3 = b(i + 2)
+            c4 = b(i + 3)
+
+            ' F0 forbids overlong (second byte 90..BF); F4 caps the range at
+            ' U+10FFFF (second byte 80..8F).
+            If c = &HF0 Then
+                If c2 < &H90 Or c2 > &HBF Then Exit Function
+            ElseIf c = &HF4 Then
+                If c2 < &H80 Or c2 > &H8F Then Exit Function
+            Else
+                If c2 < &H80 Or c2 > &HBF Then Exit Function
+            End If
+            If c3 < &H80 Or c3 > &HBF Then Exit Function
+            If c4 < &H80 Or c4 > &HBF Then Exit Function
+
+            cp = (c And &H7) * 262144 + (c2 And &H3F) * 4096& + (c3 And &H3F) * 64& + (c4 And &H3F)
+
+            Dim v As Long
+            Dim hiSur As Long
+            Dim loSur As Long
+            v = cp - &H10000
+            hiSur = &HD800& + (v \ 1024)
+            loSur = &HDC00& + (v Mod 1024)
+
+            o(wp) = hiSur And &HFF
+            o(wp + 1) = hiSur \ 256
+            o(wp + 2) = loSur And &HFF
+            o(wp + 3) = loSur \ 256
+            wp = wp + 4
+            i = i + 4
+
+        Else                                    ' 80..C1 stray/overlong, F5..FF
+            Exit Function
+        End If
+    Loop
+
+    If wp = 0 Then
+        outText = vbNullString
+    Else
+        ReDim Preserve o(0 To wp - 1) As Byte
+        outText = o
+    End If
+
+    Json_TryDecodeUtf8 = True
 End Function
 
 ' ============================================================================
@@ -4223,18 +4461,12 @@ End Function
 '     one character at a time.
 ' =============================================================================
 
-' Read a CSV file and convert it via CsvTextToJson.
+' Read a CSV file and convert it via CsvTextToJson. The file is read through
+' Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and legacy ANSI
+' files all decode correctly.
 
 Public Function CsvFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    CsvFileToJson = CsvTextToJson(txt)
+    CsvFileToJson = CsvTextToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert raw CSV text into a JSON array-of-objects.
@@ -4511,15 +4743,7 @@ End Sub
 ' =============================================================================
 
 Public Function XmlFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    XmlFileToJson = XmlTextToJson(txt)
+    XmlFileToJson = XmlTextToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert raw XML text into JSON text.
@@ -5021,18 +5245,12 @@ End Function
 ' This module has no Excel references, so it is part of the all-O365 build.
 ' =============================================================================
 
-' Read an NDJSON file and convert it via NdjsonToJson.
+' Read an NDJSON file and convert it via NdjsonToJson. The file is read
+' through Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and
+' legacy ANSI files all decode correctly.
 
 Public Function NdjsonFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    NdjsonFileToJson = NdjsonToJson(txt)
+    NdjsonFileToJson = NdjsonToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert NDJSON text into a JSON array-of-values string.

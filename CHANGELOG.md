@@ -4,6 +4,29 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-07-07
+
+### Added
+
+- `Json_ReadTextFile`: read a text file into a VBA string with encoding
+  detection. UTF-16 LE/BE are recognized by BOM; everything else goes through
+  a strict pure-VBA UTF-8 decoder (BOM stripped if present) and falls back to
+  the system ANSI codepage when the bytes are not valid UTF-8, which keeps
+  legacy ANSI exports readable. No Declare statements, so it works on every
+  VBA host, Mac included. Host-agnostic, so it is in both single-file builds.
+- `CONFORMANCE.md`: results of running the parser against JSONTestSuite, the
+  standard RFC 8259 conformance corpus. All 95 valid documents accepted, all
+  176 invalid documents rejected, no crashes; deep-nesting attacks reject
+  through a trappable error. Implementation-defined choices are documented.
+
+### Fixed
+
+- `CsvFileToJson`, `XmlFileToJson`, and `NdjsonFileToJson` read files through
+  `Json_ReadTextFile` instead of the ANSI-only `Input$` path. UTF-8 files with
+  accented characters, CJK text, or emoji previously decoded as mojibake;
+  UTF-16 files decoded as garbage. Pure-ASCII files (and legacy ANSI files)
+  read exactly as before.
+
 ## [3.6.1] - 2026-07-07
 
 ### Performance
@@ -167,6 +190,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.7.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.7.0
 [3.6.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.1
 [3.6.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.0
 [3.5.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.5.0

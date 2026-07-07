@@ -23,17 +23,11 @@ Option Explicit
 '     one character at a time.
 ' =============================================================================
 
-' Read a CSV file and convert it via CsvTextToJson.
+' Read a CSV file and convert it via CsvTextToJson. The file is read through
+' Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and legacy ANSI
+' files all decode correctly.
 Public Function CsvFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    CsvFileToJson = CsvTextToJson(txt)
+    CsvFileToJson = CsvTextToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert raw CSV text into a JSON array-of-objects.

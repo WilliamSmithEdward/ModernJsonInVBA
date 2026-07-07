@@ -21,6 +21,7 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
   - [Payloads](#payloads)
   - [Timings (seconds)](#timings-seconds)
   - [Reproducing these numbers](#reproducing-these-numbers)
+- [Conformance](#conformance)
 - [Installation](#installation)
   - [Option 1: Single file, Excel](#option-1-single-file-excel-recommended)
   - [Option 2: Single file, all O365 apps](#option-2-single-file-all-o365-apps-word-powerpoint-access-excel)
@@ -203,6 +204,18 @@ only for `nested`, which rebuilds dotted column paths
 Both macros print Markdown to the Immediate window, ready to paste into an
 issue or PR. Drop your own `*.json` files into `json_payloads/` and they are
 picked up automatically.
+
+## Conformance
+
+The parser passes [JSONTestSuite](https://github.com/nst/JSONTestSuite), the
+standard RFC 8259 conformance corpus: **95/95** valid documents accepted,
+**176/176** invalid documents rejected, no crashes (deep-nesting attacks
+reject through a trappable error instead of terminating the host). Files
+whose point is invalid bytes rather than invalid JSON exercise
+`Json_ReadTextFile`, the encoding-detecting file reader (UTF-8 with strict
+validation, UTF-16 LE/BE by BOM, ANSI fallback for legacy files). Results,
+implementation-defined choices, and reproduction steps are in
+[CONFORMANCE.md](CONFORMANCE.md).
 
 ## Installation
 
@@ -903,22 +916,25 @@ Errors protect against:
 ### CSV / XML / NDJSON Adapters
 
 - `Public Function CsvFileToJson(ByVal filePath As String) As String`  
-  Reads a CSV file from disk and converts it into a JSON array-of-objects.
+  Reads a CSV file from disk and converts it into a JSON array-of-objects. Reads through `Json_ReadTextFile`, so UTF-8 (with or without BOM), UTF-16, and legacy ANSI files all decode correctly.
 
 - `Public Function CsvTextToJson(ByVal txt As String) As String`  
   Converts raw CSV text into a JSON array-of-objects using the library's built-in CSV parser.
 
 - `Public Function XmlFileToJson(ByVal filePath As String) As String`  
-  Reads an XML file from disk and converts it into JSON.
+  Reads an XML file from disk and converts it into JSON. Same encoding detection as `CsvFileToJson`.
 
 - `Public Function XmlTextToJson(ByVal txt As String) As String`  
   Converts raw XML text into JSON using the library's lightweight pure-VBA XML parser.
 
 - `Public Function NdjsonFileToJson(ByVal filePath As String) As String`  
-  Reads an NDJSON (newline-delimited JSON / JSON Lines) file from disk and converts it into a JSON array.
+  Reads an NDJSON (newline-delimited JSON / JSON Lines) file from disk and converts it into a JSON array. Same encoding detection as `CsvFileToJson`.
 
 - `Public Function NdjsonToJson(ByVal txt As String) As String`  
   Converts NDJSON text (one JSON value per line) into a JSON array string, so each line becomes one record. Feeds straight into `Json_Parse` or the table upsert (`Excel_UpsertListObjectFromJsonAtRoot(ws, name, cell, NdjsonToJson(text), "$")`). Accepts `\n`, `\r\n`, and `\r`; blank lines are skipped.
+
+- `Public Function Json_ReadTextFile(ByVal filePath As String) As String`  
+  Reads a text file into a VBA string with encoding detection: UTF-16 LE/BE by BOM, then strict UTF-8 validation (BOM stripped if present), then the system ANSI codepage as the legacy fallback. Pure VBA with no Declare statements, so it works on every VBA host, Mac included. Used by all three `*FileToJson` adapters and available for your own file reading (for example `Json_Parse(Json_ReadTextFile(path))`).
 
 ### JSON Coalescing Utilities
 

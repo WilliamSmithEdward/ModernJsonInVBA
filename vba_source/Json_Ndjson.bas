@@ -26,17 +26,11 @@ Option Explicit
 ' This module has no Excel references, so it is part of the all-O365 build.
 ' =============================================================================
 
-' Read an NDJSON file and convert it via NdjsonToJson.
+' Read an NDJSON file and convert it via NdjsonToJson. The file is read
+' through Json_ReadTextFile, so UTF-8 (with or without BOM), UTF-16, and
+' legacy ANSI files all decode correctly.
 Public Function NdjsonFileToJson(ByVal filePath As String) As String
-    Dim f As Integer
-    f = FreeFile
-
-    Dim txt As String
-    Open filePath For Input As #f
-    txt = Input$(LOF(f), f)
-    Close #f
-
-    NdjsonFileToJson = NdjsonToJson(txt)
+    NdjsonFileToJson = NdjsonToJson(Json_ReadTextFile(filePath))
 End Function
 
 ' Convert NDJSON text into a JSON array-of-values string.
