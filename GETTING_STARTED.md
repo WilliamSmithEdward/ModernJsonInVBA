@@ -45,8 +45,8 @@ Set ws = ThisWorkbook.Worksheets("Sheet1")
 
 **About JSON in VBA strings.** VBA doubles quotes inside string literals, so
 `{"id":1}` is written `"{""id"":1}"`. Example 1 shows the literal once; after
-that, examples show the JSON in its own block for readability. In real code
-the JSON usually arrives from a file or an HTTP response, not a literal:
+that, examples show the JSON in its own block for readability. Loading the
+JSON from a file or an HTTP response avoids the escaping entirely:
 
 ```vba
 json = Json_ReadTextFile("C:\data\payload.json")   ' any encoding, BOM handled
@@ -58,7 +58,7 @@ json = Json_ReadTextFile("C:\data\payload.json")   ' any encoding, BOM handled
 
 ### 1. A flat array becomes a table
 
-The most common shape: a JSON array of objects, one object per row.
+A JSON array of objects: each object becomes one row.
 
 The JSON:
 
@@ -90,8 +90,8 @@ again and the table refreshes in place instead of duplicating.
 
 ### 2. Rows with different keys
 
-Real feeds rarely have identical rows. The columns are the union of every
-key seen, still in first-seen order, and a row without a key gets a blank
+Rows do not need identical keys. The columns are the union of every key
+seen, still in first-seen order, and a row without a key gets a blank
 cell.
 
 The JSON:
@@ -179,9 +179,8 @@ on the way back out: example 8 rebuilds the nesting from them.
 
 ### 5. The table is inside an API envelope
 
-APIs rarely hand you a bare array. The rows usually sit under a key, with
-metadata alongside. Point `tableRoot` at the array instead of reshaping the
-JSON yourself.
+When the rows sit under a key, with metadata alongside, point `tableRoot`
+at the array instead of reshaping the JSON yourself.
 
 The JSON:
 
@@ -379,8 +378,8 @@ Excel_UpsertListObjectFromSource ws, "FromCsv", ws.Range("A1"), csv, ExcelSource
 | 1 | Alice |
 | 2 | Bob |
 
-**NDJSON** (one JSON object per line, the common log and bulk-export
-format) converts to a JSON array with one call, so it feeds anything above:
+**NDJSON** (one JSON value per line) converts to a JSON array with one
+call, so it feeds anything above:
 
 ```vba
 Excel_UpsertListObjectFromJsonAtRoot ws, "Events", ws.Range("A1"), NdjsonToJson(text)
