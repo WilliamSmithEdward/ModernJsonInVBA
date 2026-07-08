@@ -13,10 +13,16 @@ RFC 8259 conformant: passes [JSONTestSuite](CONFORMANCE.md) with 95/95 valid doc
 \
 Take nested or complex API payloads and  convert them into normalized Excel tables with parent keys preserved. Supports Excel formula and scalar value injection.
 
+> [!TIP]
+> **New here? Start with the [Getting Started guide](GETTING_STARTED.md).**
+> Ten short examples, from a two-row table to nested API envelopes, each
+> showing the JSON payload next to the Excel table it produces.
+
 ------------------------------------------------------------------------
 
 ## Contents
 
+- [Getting Started guide (new users)](GETTING_STARTED.md)
 - [Introduction](#introduction)
 - [What This Solves](#what-this-solves)
 - [Core Capabilities](#core-capabilities)
