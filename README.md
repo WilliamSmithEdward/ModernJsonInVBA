@@ -1,5 +1,6 @@
 # ModernJsonInVBA
 
+[![JSONTestSuite](https://img.shields.io/badge/JSONTestSuite-passing-brightgreen)](CONFORMANCE.md)
 [![GitHub stars](https://img.shields.io/github/stars/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -7,6 +8,8 @@
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
 Pure VBA. No dependencies. No silent schema drift.  
+\
+RFC 8259 conformant: passes [JSONTestSuite](CONFORMANCE.md) with 95/95 valid documents accepted, 176/176 invalid documents rejected, and no crashes.  
 \
 Take nested or complex API payloads and  convert them into normalized Excel tables with parent keys preserved. Supports Excel formula and scalar value injection.
 
@@ -100,6 +103,7 @@ No fallback tables.
 ## Core Capabilities
 
 -   Parse JSON into VBA Variants (objects, arrays, primitives)
+-   RFC 8259 strict, verified against the full [JSONTestSuite](CONFORMANCE.md) conformance corpus
 -   Convert VBA structures back into JSON
 -   Flatten and rebuild object graphs
 -   Discover array-of-object roots
