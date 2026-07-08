@@ -142,6 +142,11 @@ End Sub
 ' Resolve a JSONPath-like path ("$", "$.a.b", "$.items[0].id") against a
 ' parsed model value. Returns False when any step cannot be resolved.
 ' No wildcards or filters; array indices are zero-based.
+'
+' Segments use the same escape convention as flattened paths and column
+' headers: "\." is a literal dot inside a key and "\\" a literal backslash,
+' so "$.a\.b.c" walks the key "a.b" then "c". Any other character after a
+' backslash stays literal (Json_UnescapePathSegment's rules).
 Public Function Json_TryResolvePath( _
     ByVal root As Variant, _
     ByVal path As String, _
@@ -171,16 +176,24 @@ Public Function Json_TryResolvePath( _
     i = 3   ' after "$."
 
     Do While i <= Len(path)
-        ' Read a member name up to the next "." or "[".
+        ' Read a member name up to the next unescaped "." or "[". A
+        ' backslash keeps its following character inside the segment (raw;
+        ' decoded just before the lookup), so "\." does not end the segment.
         Dim seg As String
         seg = vbNullString
 
         Do While i <= Len(path)
             Dim ch As String
             ch = Mid$(path, i, 1)
-            If ch = "." Or ch = "[" Then Exit Do
-            seg = seg & ch
-            i = i + 1
+            If ch = "\" And i < Len(path) Then
+                seg = seg & ch & Mid$(path, i + 1, 1)
+                i = i + 2
+            ElseIf ch = "." Or ch = "[" Then
+                Exit Do
+            Else
+                seg = seg & ch
+                i = i + 1
+            End If
         Loop
 
         If Len(seg) > 0 Then
@@ -189,7 +202,7 @@ Public Function Json_TryResolvePath( _
             If Not Json_IsObject(cur) Then Exit Function
 
             Dim nextVal As Variant
-            If Not Json_TryObjGet(cur, seg, nextVal) Then Exit Function
+            If Not Json_TryObjGet(cur, Json_UnescapePathSegment(seg), nextVal) Then Exit Function
             Json_VarAssign cur, nextVal
         End If
 
@@ -251,6 +264,7 @@ End Function
 
 ' Resolve a dotted path ("$", "$.products") that must land on an array.
 ' Raising variant used by the coalesce pipeline; no index steps supported.
+' Segments use the same "\." / "\\" escapes as Json_TryResolvePath.
 '
 ' Errors (vbObjectError + n):
 '   5310 empty path            5311 root is not an array
@@ -282,22 +296,22 @@ Public Function Json_ResolveArrayPath( _
             "Path must begin with '$.'"
     End If
 
-    Dim parts() As String
-    parts = Split(Mid$(path, 3), ".")
+    Dim parts As Collection
+    Set parts = Json_TokenizePath(Mid$(path, 3))
 
     Dim current As Object
     Set current = root
 
-    Dim i As Long
-    For i = LBound(parts) To UBound(parts)
+    Dim seg As Variant
+    For Each seg In parts
 
         If Not TypeOf current Is Collection Then
             Err.Raise vbObjectError + 5313, SRC, _
                 "Path traversal encountered non-object"
         End If
 
-        Set current = Json_ObjGet(current, parts(i))
-    Next i
+        Set current = Json_ObjGet(current, Json_UnescapePathSegment(CStr(seg)))
+    Next seg
 
     If Not TypeOf current Is Collection Then
         Err.Raise vbObjectError + 5315, SRC, _

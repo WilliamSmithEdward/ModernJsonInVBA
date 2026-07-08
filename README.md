@@ -771,15 +771,16 @@ Supported path patterns:
 -   `$.property`
 -   `$.property.child`
 -   `$.array[0].items`
+-   `$.a\.b.items` (a key containing a literal dot, escaped)
 
 Zero-based indexing inside brackets.
 
-Every dot in the path is a level separator; there is no escape syntax, so a
-key that itself contains a dot (`{"a.b": {...}}`) cannot be addressed by
-`tableRoot`. Read such values through `Json_Parse` + `Json_TryObjGet`, which
-take the literal key. Inside table *columns* the collision cannot happen:
-a dotted key is escaped in the header (`a\.b`), distinct from real nesting
-(`a.b`), and round-trips back to the original key on export.
+A key that itself contains a dot is addressed with the same escape the
+column headers use: `\.` is a literal dot inside a key and `\\` a literal
+backslash. `$.a\.b.items` walks the key `a.b`; `$.a.b.items` walks `a` then
+`b`. The same escapes work in `Json_TryResolvePath` and the coalesce paths.
+Keys containing `[` are the one shape a path cannot address; read those
+through `Json_Parse` + `Json_TryObjGet`, which take the literal key.
 
 ------------------------------------------------------------------------
 

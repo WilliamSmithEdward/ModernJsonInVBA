@@ -214,8 +214,10 @@ The result:
 
 `tableRoot` is a simple path from the document root: `$` is the root itself
 (and the default when you omit the argument), `$.data.items` descends two
-keys. The siblings (`meta`, `ok`) are validated and skipped, and the import
-streams at the same speed as a bare array.
+keys. A key containing a literal dot is escaped the same way as in column
+headers: `$.a\.b.items` walks the key `a.b`. The siblings (`meta`, `ok`)
+are validated and skipped, and the import streams at the same speed as a
+bare array.
 
 ### 6. Arrays inside rows
 

@@ -4,6 +4,23 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-07-07
+
+### Added
+
+- Path segments in `tableRoot`, `Json_TryResolvePath`, and the coalesce
+  paths accept the column-header escape convention: `\.` addresses a key
+  containing a literal dot and `\\` a key containing a literal backslash,
+  so `$.a\.b.items` reaches rows under the key `a.b`. The streamed import
+  and the model path resolve escapes identically; escape plus a bracket
+  index (`$.a\.b[0]`) resolves through the model path. This closes the
+  limitation documented in 3.7.0: previously a dotted key was unreachable
+  by any path.
+
+  Behavior note: a path containing the literal character sequences `\.` or
+  `\\` previously matched keys containing those raw characters; those
+  sequences now mean the escape. Paths without backslashes are unchanged.
+
 ## [3.7.0] - 2026-07-07
 
 ### Added
@@ -190,6 +207,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.0
 [3.7.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.7.0
 [3.6.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.1
 [3.6.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.0

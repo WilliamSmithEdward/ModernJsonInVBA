@@ -1448,7 +1448,8 @@ End Function
 ' Stream a JSON array-of-objects directly into a 2D Variant array plus a
 ' header index, without building the Collection model. The array may sit at
 ' the document root (tableRoot "$") or nested under simple member steps
-' (tableRoot "$.data.items"): the reader descends to the table root, moving
+' (tableRoot "$.data.items"; a key containing a literal dot escapes it as
+' "$.a\.b.items"): the reader descends to the table root, moving
 ' past sibling members with validating skip scanners that build nothing and,
 ' for the usual escape-free text, allocate nothing. Cell values, header
 ' discovery order, duplicate-key overwrites, and the validations the model
@@ -1482,9 +1483,12 @@ Public Function Json_TryParseTableStream( _
     outRowCount = 0
 
     ' Path analysis: "$" streams at the document root; "$.a.b" descends one
-    ' member step per segment. Everything else declines to the model path.
-    ' Trimming matches Json_TryResolvePath, so both paths address the same
-    ' root for the same input.
+    ' member step per segment. Segments are tokenized on unescaped dots and
+    ' decoded, so "$.a\.b" addresses the literal key "a.b" (the column-header
+    ' escape convention, resolved the same way by Json_TryResolvePath on the
+    ' model path). Bracket paths and empty segments decline to the model
+    ' path. Trimming matches Json_TryResolvePath, so both paths address the
+    ' same root for the same input.
     Dim segs() As String
     Dim segCount As Long
 
@@ -1495,13 +1499,23 @@ Public Function Json_TryParseTableStream( _
         If Left$(root, 2) <> "$." Then Exit Function
         If InStr(1, root, "[", vbBinaryCompare) > 0 Then Exit Function
 
-        segs = Split(Mid$(root, 3), ".")
-        segCount = UBound(segs) + 1
+        Dim tokens As Collection
+        Set tokens = Json_TokenizePath(Mid$(root, 3))
+        segCount = tokens.count
 
-        Dim si As Long
-        For si = 0 To UBound(segs)
-            If Len(segs(si)) = 0 Then Exit Function
-        Next si
+        If segCount > 0 Then
+            ReDim segs(0 To segCount - 1) As String
+
+            Dim si As Long
+            si = 0
+
+            Dim tok As Variant
+            For Each tok In tokens
+                If Len(CStr(tok)) = 0 Then Exit Function
+                segs(si) = Json_UnescapePathSegment(CStr(tok))
+                si = si + 1
+            Next tok
+        End If
     End If
 
     Dim r As JsonReader
@@ -2963,6 +2977,11 @@ End Sub
 ' Resolve a JSONPath-like path ("$", "$.a.b", "$.items[0].id") against a
 ' parsed model value. Returns False when any step cannot be resolved.
 ' No wildcards or filters; array indices are zero-based.
+'
+' Segments use the same escape convention as flattened paths and column
+' headers: "\." is a literal dot inside a key and "\\" a literal backslash,
+' so "$.a\.b.c" walks the key "a.b" then "c". Any other character after a
+' backslash stays literal (Json_UnescapePathSegment's rules).
 Public Function Json_TryResolvePath( _
     ByVal root As Variant, _
     ByVal path As String, _
@@ -2992,16 +3011,24 @@ Public Function Json_TryResolvePath( _
     i = 3   ' after "$."
 
     Do While i <= Len(path)
-        ' Read a member name up to the next "." or "[".
+        ' Read a member name up to the next unescaped "." or "[". A
+        ' backslash keeps its following character inside the segment (raw;
+        ' decoded just before the lookup), so "\." does not end the segment.
         Dim seg As String
         seg = vbNullString
 
         Do While i <= Len(path)
             Dim ch As String
             ch = Mid$(path, i, 1)
-            If ch = "." Or ch = "[" Then Exit Do
-            seg = seg & ch
-            i = i + 1
+            If ch = "\" And i < Len(path) Then
+                seg = seg & ch & Mid$(path, i + 1, 1)
+                i = i + 2
+            ElseIf ch = "." Or ch = "[" Then
+                Exit Do
+            Else
+                seg = seg & ch
+                i = i + 1
+            End If
         Loop
 
         If Len(seg) > 0 Then
@@ -3010,7 +3037,7 @@ Public Function Json_TryResolvePath( _
             If Not Json_IsObject(cur) Then Exit Function
 
             Dim nextVal As Variant
-            If Not Json_TryObjGet(cur, seg, nextVal) Then Exit Function
+            If Not Json_TryObjGet(cur, Json_UnescapePathSegment(seg), nextVal) Then Exit Function
             Json_VarAssign cur, nextVal
         End If
 
@@ -3072,6 +3099,7 @@ End Function
 
 ' Resolve a dotted path ("$", "$.products") that must land on an array.
 ' Raising variant used by the coalesce pipeline; no index steps supported.
+' Segments use the same "\." / "\\" escapes as Json_TryResolvePath.
 '
 ' Errors (vbObjectError + n):
 '   5310 empty path            5311 root is not an array
@@ -3103,22 +3131,22 @@ Public Function Json_ResolveArrayPath( _
             "Path must begin with '$.'"
     End If
 
-    Dim parts() As String
-    parts = Split(Mid$(path, 3), ".")
+    Dim parts As Collection
+    Set parts = Json_TokenizePath(Mid$(path, 3))
 
     Dim current As Object
     Set current = root
 
-    Dim i As Long
-    For i = LBound(parts) To UBound(parts)
+    Dim seg As Variant
+    For Each seg In parts
 
         If Not TypeOf current Is Collection Then
             Err.Raise vbObjectError + 5313, SRC, _
                 "Path traversal encountered non-object"
         End If
 
-        Set current = Json_ObjGet(current, parts(i))
-    Next i
+        Set current = Json_ObjGet(current, Json_UnescapePathSegment(CStr(seg)))
+    Next seg
 
     If Not TypeOf current Is Collection Then
         Err.Raise vbObjectError + 5315, SRC, _
