@@ -774,6 +774,13 @@ Supported path patterns:
 
 Zero-based indexing inside brackets.
 
+Every dot in the path is a level separator; there is no escape syntax, so a
+key that itself contains a dot (`{"a.b": {...}}`) cannot be addressed by
+`tableRoot`. Read such values through `Json_Parse` + `Json_TryObjGet`, which
+take the literal key. Inside table *columns* the collision cannot happen:
+a dotted key is escaped in the header (`a\.b`), distinct from real nesting
+(`a.b`), and round-trips back to the original key on export.
+
 ------------------------------------------------------------------------
 
 ## Schema Control

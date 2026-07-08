@@ -177,6 +177,10 @@ Nesting can go as deep as your payload does; a
 `{"a":{"b":{"c":1}}}` leaf becomes column `a.b.c`. The dotted names matter
 on the way back out: example 8 rebuilds the nesting from them.
 
+A key that itself contains a dot stays one column: `{"a.b": 1}` gets the
+header `a\.b` (the dot is escaped), so it never collides with real nesting,
+and it exports back as the original `"a.b"` key.
+
 ### 5. The table is inside an API envelope
 
 When the rows sit under a key, with metadata alongside, point `tableRoot`
