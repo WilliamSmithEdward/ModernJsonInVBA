@@ -4,6 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Xml
 ' Project:     ModernJsonInVBA
+' Version:     3.8.2
+' Released:    2026-07-09
 '
 ' XML -> JSON conversion using a lightweight pure-VBA parser (no MSXML, so
 ' the conversion works on every Office platform).

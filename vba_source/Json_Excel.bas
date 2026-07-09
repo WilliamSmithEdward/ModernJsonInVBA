@@ -4,6 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Excel
 ' Project:     ModernJsonInVBA
+' Version:     3.8.2
+' Released:    2026-07-09
 '
 ' Excel ListObject ingestion: deterministic loading of JSON/CSV/XML into
 ' tables. The reverse direction (tables/ranges back to JSON) lives in

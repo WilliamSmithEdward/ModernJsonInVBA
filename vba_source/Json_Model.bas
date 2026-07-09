@@ -4,6 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Model
 ' Project:     ModernJsonInVBA
+' Version:     3.8.2
+' Released:    2026-07-09
 '
 ' The in-memory model contract and its accessors.
 '

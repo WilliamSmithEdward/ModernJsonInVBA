@@ -4,6 +4,15 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.2] - 2026-07-09
+
+### Changed
+
+- Every library module header and both single-file builds now carry the
+  release version and date. `build_dist.py` stamps them from the top entry
+  of this changelog, so an imported module identifies which release it came
+  from and the stamps cannot drift from the release notes.
+
 ## [3.8.1] - 2026-07-08
 
 ### Fixed
@@ -225,6 +234,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.2]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.2
 [3.8.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.1
 [3.8.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.0
 [3.7.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.7.0
