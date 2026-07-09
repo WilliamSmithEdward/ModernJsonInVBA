@@ -658,17 +658,38 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
         End If
     End If
 
-    ' Empty result + removeMissingColumns: keep the existing schema and just
-    ' clear the data instead of collapsing the table to ["value"].
-    If removeMissingColumns And rowCount = 0 Then
-        Dim loExisting As ListObject
+    ' Empty result against an existing table: keep the table's schema. The
+    ' ["value"] placeholder exists only because a brand-new ListObject
+    ' cannot have zero columns; letting it reach schema reconciliation
+    ' would add a spurious "value" column (or, with removeMissingColumns,
+    ' collapse a real layout). clearExisting keeps its meaning: True clears
+    ' the rows, False appends nothing. The removeMissingColumns combination
+    ' keeps its historical forced clear.
+    Dim loExisting As ListObject
+
+    If rowCount = 0 Then
         Set loExisting = Excel_GetListObject(ws, tableName)
 
         If Not loExisting Is Nothing Then
             headersOut = Excel_ListObjectHeadersTo1D(loExisting)
             addMissingColumns = False
+            If removeMissingColumns Then clearExisting = True
             removeMissingColumns = False
-            clearExisting = True
+        End If
+
+    ElseIf headerIdx.count > 0 Then
+        ' Real headers arriving at a table that is still the zero-row
+        ' ["value"] placeholder (created by an earlier empty result with no
+        ' prior table): replace the placeholder schema instead of merging,
+        ' so the placeholder column does not stick to the table. The table
+        ' holds no rows, so the forced clear loses nothing.
+        Set loExisting = Excel_GetListObject(ws, tableName)
+
+        If Not loExisting Is Nothing Then
+            If Excel_IsValuePlaceholderTable(loExisting) Then
+                removeMissingColumns = True
+                clearExisting = True
+            End If
         End If
     End If
 
@@ -1111,6 +1132,16 @@ Private Function Excel_IsDefaultValueOnlyHeaders(ByVal headers As Variant) As Bo
 
 Nope:
     Excel_IsDefaultValueOnlyHeaders = False
+End Function
+
+' True when lo is the zero-row single-column "value" table this pipeline
+' creates as a placeholder for an empty result with no prior table. Used to
+' let the first real result replace the placeholder schema instead of
+' merging with it.
+Private Function Excel_IsValuePlaceholderTable(ByVal lo As ListObject) As Boolean
+    If lo.ListColumns.count <> 1 Then Exit Function
+    If LCase$(Trim$(lo.ListColumns(1).name)) <> "value" Then Exit Function
+    Excel_IsValuePlaceholderTable = (lo.ListRows.count = 0)
 End Function
 
 ' =============================================================================

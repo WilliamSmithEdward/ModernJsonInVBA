@@ -800,6 +800,15 @@ Rows refresh.
 New columns allowed.
 Columns never disappear.
 
+### Empty results
+
+An empty array (or a null table root) never disturbs an existing table's
+layout: a refresh clears the rows and keeps the schema, an append changes
+nothing. When there is no prior table, the result is a zero-row table with
+a single placeholder column named `value`, because a ListObject cannot
+have zero columns; the first result with real headers replaces that
+placeholder schema instead of merging with it.
+
 ------------------------------------------------------------------------
 
 ## Deterministic Errors

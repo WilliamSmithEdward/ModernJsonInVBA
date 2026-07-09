@@ -4,6 +4,24 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1] - 2026-07-08
+
+### Fixed
+
+- An empty result (an empty JSON array, or a null table root) no longer
+  disturbs an existing table's layout. Previously the internal `["value"]`
+  placeholder schema leaked into reconciliation, so a default refresh
+  appended a spurious `value` column to the table (and an empty append did
+  the same instead of being a no-op). Now: refresh clears the rows and
+  leaves the schema untouched, append changes nothing, and the
+  `removeMissingColumns` combination keeps its schema-preserving clear.
+- The `value` placeholder no longer sticks to a table once real data
+  arrives. The placeholder appears only when an empty result must create a
+  brand-new table (a ListObject cannot have zero columns); the first result
+  with real headers now replaces that zero-row placeholder schema instead
+  of merging with it. A single-column `value` table that holds rows is
+  treated as user data and merges normally.
+
 ## [3.8.0] - 2026-07-07
 
 ### Added
@@ -207,6 +225,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.1
 [3.8.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.0
 [3.7.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.7.0
 [3.6.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.6.1
