@@ -87,10 +87,12 @@ it. The library, the test suites, and the workbook each have their own list,
 so a finding accepted for the tests is still a failure in the library. The
 scan fails on any finding or URL host not on the list for its group.
 
-Releases from the one after 3.8.2 onward carry `security-report.md` and
-`security-report.json` as assets. The report lists every finding with its
-explanation and the SHA-256 of each release file, so you can check that a
-downloaded `.bas` or `.xlsm` matches the one that was scanned:
+Releases from 3.8.3 onward carry `security-report.md` and
+`security-report.json` as assets, attached by
+`.github/workflows/release-security-report.yml` when the release is
+published. The report lists every finding with its explanation and the
+SHA-256 of each release file, so you can check that a downloaded `.bas` or
+`.xlsm` matches the one that was scanned:
 
 ```powershell
 Get-FileHash .\ModernJsonInVBA_Excel.bas -Algorithm SHA256

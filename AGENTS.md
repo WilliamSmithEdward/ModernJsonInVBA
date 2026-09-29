@@ -46,8 +46,10 @@ Follow this order; the version stamps depend on it.
    `gh release create vx.y.z` with BOTH `dist/*.bas` files attached as
    assets. Confirm new test files actually appear in the staged list
    (`A Tests/...`) before pushing. Publishing the release triggers
-   `.github/workflows/security.yml`, which attaches `security-report.md`
-   and `security-report.json`; check they appear on the release.
+   `.github/workflows/release-security-report.yml`, which rescans the tag,
+   checks the report's hashes against the release's `.bas` files, and
+   attaches `security-report.md` and `security-report.json`; check they
+   appear on the release.
 
 ## Project constraints
 

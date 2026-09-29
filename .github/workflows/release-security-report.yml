@@ -1,0 +1,61 @@
+name: Release security report
+
+# When a release is published: run the security scan on the tagged commit,
+# check that the report's SHA-256 hashes match the release's .bas files,
+# and attach security-report.md and security-report.json to the release.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    uses: ./.github/workflows/security.yml
+    with:
+      label: ${{ github.event.release.tag_name }}
+
+  attach:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: security-report
+          path: security-report
+
+      - name: Check the report's hashes against the release files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --pattern "*.bas" --dir assets --repo "$GITHUB_REPOSITORY"
+          python3 - <<'EOF'
+          import hashlib, json, pathlib, sys
+          report = json.load(open("security-report/security-report.json"))
+          assets = sorted(pathlib.Path("assets").glob("*.bas"))
+          if not assets:
+              sys.exit("no .bas assets on the release")
+          bad = 0
+          for asset in assets:
+              want = report["release_files"].get("dist/" + asset.name)
+              got = hashlib.sha256(asset.read_bytes()).hexdigest()
+              print(f"{asset.name}: report {want} release {got}")
+              bad += want != got
+          sys.exit(1 if bad else 0)
+          EOF
+
+      - name: Attach report to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: >
+          gh release upload "$TAG"
+          security-report/security-report.md
+          security-report/security-report.json
+          --repo "$GITHUB_REPOSITORY" --clobber
