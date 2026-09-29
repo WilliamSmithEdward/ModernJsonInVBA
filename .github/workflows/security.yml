@@ -1,13 +1,15 @@
 name: Security scan
 
 # Separate ClamAV/YARA-X and olevba/mraptor jobs scan every VBA file.
-# Runs on pushes and pull requests. release-security-report.yml calls it
+# Runs daily, on pushes and pull requests. release-security-report.yml calls it
 # when a release is published and attaches the report. See SECURITY.md.
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 8 * * *" # Daily at 08:17 UTC
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -40,6 +42,7 @@ jobs:
           sudo apt-get install -y clamav clamav-freshclam
           sudo systemctl stop clamav-freshclam || true
           sudo freshclam
+          clamscan --version
 
       - name: Scan malware signatures
         run: python security/malware_scan.py --out security-report/malware-results.json

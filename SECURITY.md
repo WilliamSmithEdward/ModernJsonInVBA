@@ -64,7 +64,7 @@ file from `dist/` instead of using the workbook.
 
 ## Automated scanning
 
-Every push, pull request, and release runs olevba and mraptor over every
+Every push, pull request, release, and daily scheduled run scans every
 VBA file in the repository (`.github/workflows/security.yml`):
 
 - [olevba](https://github.com/decalage2/oletools/wiki/olevba) flags the
@@ -89,8 +89,9 @@ scan fails on any finding or URL host not on the list for its group.
 
 The workflow shows ClamAV and YARA-X in their own CI job. It runs
 [ClamAV](https://docs.clamav.net/manual/Usage/Scanning.html)
-with freshly updated official signatures and [YARA-X](https://virustotal.github.io/yara-x/docs/api/python/)
-with the pinned [YARA Forge core collection](https://github.com/YARAHQ/yara-forge/releases/tag/20260927).
+with official signatures refreshed by `freshclam` on each CI run and
+[YARA-X](https://virustotal.github.io/yara-x/docs/api/python/) with the
+pinned [YARA Forge core collection](https://github.com/YARAHQ/yara-forge/releases).
 It scans the twelve source modules, both generated builds, test modules,
 payload modules, and the shipping workbook. ClamAV also scans VBA extracted
 from those files, and YARA-X runs focused local rules over that extracted
@@ -100,6 +101,15 @@ versions, the collection URL and
 archive SHA-256, every match, and scan errors. The download must match the
 pinned archive SHA-256 before its rules are compiled. An unavailable scanner, failed
 signature update, or rule compilation error fails CI.
+
+The pinned YARA Forge release and SHA-256 are in
+[`security/yara-forge.json`](security/yara-forge.json). A weekly workflow
+(`.github/workflows/update-yara-forge.yml`) checks the latest stable release,
+downloads the core archive, verifies its published checksum, and proposes
+the new pin in a pull request. It dispatches the existing Security workflow
+on the draft PR branch so that the new rules scan the repository before review.
+The updater does not accept findings or merge the PR. Check the Security run
+before marking the draft ready or merging it.
 
 The local YARA-X rules mirror ReDim's focused checks for encoded PowerShell,
 remote execution through Windows binaries, and Office Run key persistence.

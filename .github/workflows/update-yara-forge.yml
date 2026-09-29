@@ -1,0 +1,58 @@
+name: Update YARA Forge rules
+
+on:
+  schedule:
+    - cron: "41 9 * * 1" # Mondays at 09:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # Dispatch the existing Security workflow for a GITHUB_TOKEN PR.
+
+concurrency:
+  group: update-yara-forge
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Check latest YARA Forge release and archive checksum
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python security/update_yara_forge.py
+
+      - name: Propose pinned rules update
+        id: pr
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          add-paths: security/yara-forge.json
+          branch: codex/update-yara-forge
+          delete-branch: true
+          draft: true
+          commit-message: "Pin latest YARA Forge core rules"
+          title: "Pin latest YARA Forge core rules"
+          body: |
+            Updates the YARA Forge core release and its verified archive SHA-256.
+
+            The existing Security workflow scans this PR branch. Check that run
+            before marking this draft ready or merging it. Review any new matches
+            and document only known acceptable findings as exact exceptions with
+            specific reasons. Do not auto-merge this PR.
+
+      # GITHUB_TOKEN-created PR events do not reliably start pull_request CI.
+      # workflow_dispatch is an explicit exception, so scan the exact PR branch.
+      - name: Scan proposed rules with Security workflow
+        if: ${{ steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+        run: gh workflow run security.yml --ref "$PR_BRANCH"
