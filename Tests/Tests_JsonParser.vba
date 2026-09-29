@@ -151,7 +151,7 @@ Private Sub AssertEquals(ByVal expected As Variant, ByVal actual As Variant, ByV
             "ASSERT FAIL: " & message & " | expected=" & SafeToString(expected) & " actual=<Null>"
     End If
 
-    ' ---- Empty handling (optional, but avoids “Invalid use of Empty” edge cases) ----
+    ' ---- Empty handling (optional, but avoids "Invalid use of Empty" edge cases) ----
     If IsEmpty(expected) Then
         If IsEmpty(actual) Then Exit Sub
         Err.Raise vbObjectError + 611, "mJsonTests", _
@@ -813,7 +813,7 @@ End Sub
 
 Private Sub Test_Parse_UnicodeEscape4_BasicBMP()
     ' Goal: \uXXXX decodes BMP character correctly.
-    ' Input: "\u00E9" (é)
+    ' Input: "\u00E9" (U+00E9)
     ' Expect: parsed string equals ChrW(&H00E9)
     Dim s As String
     s = CStr(Json_Parse("""\u00E9"""))

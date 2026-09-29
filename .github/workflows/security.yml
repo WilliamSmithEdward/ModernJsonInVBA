@@ -1,6 +1,6 @@
 name: Security scan
 
-# olevba and mraptor scan of every VBA file against security/baseline.json.
+# olevba, mraptor, ClamAV, and YARA-X scan of every VBA file.
 # Runs on pushes and pull requests. release-security-report.yml calls it
 # when a release is published and attaches the report. See SECURITY.md.
 
@@ -22,7 +22,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,13 +32,23 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install oletools
+      - name: Install Python scanners
         run: python -m pip install -r security/requirements.txt
+
+      - name: Install ClamAV and update signatures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav clamav-freshclam
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+
+      - name: Scan malware signatures
+        run: python security/malware_scan.py --out security-report/malware-results.json
 
       - name: Scan
         env:
           LABEL: ${{ inputs.label }}
-        run: python security/scan.py --out security-report ${LABEL:+--label "$LABEL"}
+        run: python security/scan.py --out security-report --malware-results security-report/malware-results.json ${LABEL:+--label "$LABEL"}
 
       - name: Upload report
         if: always()

@@ -352,11 +352,52 @@ def write_report(out_dir, label, groups, problems):
     return result
 
 
+def add_malware_report(out_dir, malware_path, result):
+    """Merge signature scan results into both report formats."""
+    with open(malware_path, encoding="utf-8") as f:
+        malware = json.load(f)
+    json_path = os.path.join(out_dir, "security-report.json")
+    md_path = os.path.join(out_dir, "security-report.md")
+    with open(json_path, encoding="utf-8") as f:
+        report = json.load(f)
+    report["malware"] = malware
+    report["problems"].extend(malware["problems"])
+    report["result"] = "FAIL" if report["problems"] else "PASS"
+    with open(json_path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(report, f, indent=2)
+        f.write("\n")
+    with open(md_path, encoding="utf-8") as f:
+        md = f.read()
+    md = md.replace(f"- Result: **{result}**", f"- Result: **{report['result']}**", 1)
+    lines = ["", "## ClamAV and YARA-X", "",
+             f"- ClamAV: {malware['scanners'].get('clamav', 'unavailable')}",
+             f"- YARA-X: {malware['scanners'].get('yara_x', 'unavailable')}",
+             f"- YARA Forge core package SHA-256: `{malware['yara_forge_sha256']}`",
+             "- Local rules: `security/vba_malware.yar` over extracted VBA",
+             f"- Files scanned: {len(malware['files'])}",
+             f"- VBA modules scanned: {len(malware['modules'])}", ""]
+    if malware["findings"]:
+        lines += ["| Scanner | Signature | File | SHA-256 | Status | Reason |",
+                  "| --- | --- | --- | --- | --- | --- |"]
+        for e in malware["findings"]:
+            lines.append("| " + " | ".join(md_cell(e[k]) for k in
+                         ("scanner", "signature", "file", "sha256", "status", "reason")) + " |")
+    else:
+        lines.append("No signature matches.")
+    if malware["problems"]:
+        lines += ["", "### Scan failures", ""]
+        lines += [f"- {md_cell(p)}" for p in malware["problems"]]
+    with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(md.rstrip() + "\n" + "\n".join(lines) + "\n")
+    return report["result"]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default=os.path.join(REPO, "security-report"))
     ap.add_argument("--label", help="release or ref name for the report title")
     ap.add_argument("--update-baseline", action="store_true")
+    ap.add_argument("--malware-results", help="JSON from security/malware_scan.py")
     args = ap.parse_args()
 
     with open(BASELINE, encoding="utf-8") as f:
@@ -368,6 +409,8 @@ def main():
 
     label = args.label or git("describe", "--tags", "--always", "--dirty")
     result = write_report(args.out, label, groups, problems)
+    if args.malware_results:
+        result = add_malware_report(args.out, args.malware_results, result)
     for p in problems:
         print("scan:", p)
     print(f"scan: {result}; report in {args.out}")

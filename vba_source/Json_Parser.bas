@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Parser
 ' Project:     ModernJsonInVBA
-' Version:     3.8.3
-' Released:    2026-09-28
+' Version:     3.8.4
+' Released:    2026-09-29
 '
 ' Recursive-descent JSON parser producing the library's in-memory model:
 '

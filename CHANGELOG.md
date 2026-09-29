@@ -4,6 +4,18 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.4] - 2026-09-29
+
+### Added
+
+- ClamAV scans the shipped files and extracted VBA modules in security CI
+  using current official signatures. YARA-X scans the files with the public
+  YARA Forge core collection and extracted modules with focused VBA malware
+  rules. The release security report records both scanners and their findings.
+- Reviewed malware signature exceptions are limited to an exact scanner,
+  signature, file, and SHA-256, with a required reason. New matches and scan
+  errors fail CI.
+
 ## [3.8.3] - 2026-09-28
 
 ### Added
@@ -266,6 +278,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.4]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.4
 [3.8.3]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.3
 [3.8.2]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.2
 [3.8.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.1

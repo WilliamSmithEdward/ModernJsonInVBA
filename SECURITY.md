@@ -64,7 +64,7 @@ file from `dist/` instead of using the workbook.
 
 ## Automated scanning
 
-Every push, pull request, and release runs two oletools scanners over every
+Every push, pull request, and release runs olevba and mraptor over every
 VBA file in the repository (`.github/workflows/security.yml`):
 
 - [olevba](https://github.com/decalage2/oletools/wiki/olevba) flags the
@@ -87,6 +87,30 @@ it. The library, the test suites, and the workbook each have their own list,
 so a finding accepted for the tests is still a failure in the library. The
 scan fails on any finding or URL host not on the list for its group.
 
+The same workflow also runs [ClamAV](https://docs.clamav.net/manual/Usage/Scanning.html)
+with freshly updated official signatures and [YARA-X](https://virustotal.github.io/yara-x/docs/api/python/)
+with the current [YARA Forge core collection](https://github.com/YARAHQ/yara-forge).
+It scans the twelve source modules, both generated builds, test modules,
+payload modules, and the shipping workbook. ClamAV also scans VBA extracted
+from those files, and YARA-X runs focused local rules over that extracted
+source. YARA Forge aggregates public rules from many authors; core favors
+higher quality rules over the larger hunting sets. The report records scanner
+versions, the collection URL and
+archive SHA-256, every match, and scan errors. An unavailable scanner, failed
+signature update, or rule compilation error fails CI.
+
+The local YARA-X rules mirror ReDim's focused checks for encoded PowerShell,
+remote execution through Windows binaries, and Office Run key persistence.
+They complement the public collection and have no standing exceptions.
+
+Signature matches fail CI unless the exact scanner, signature, file path,
+and file SHA-256 appear in [`security/malware-exceptions.json`](security/malware-exceptions.json)
+with a reviewed reason. The file hash prevents an exception from covering
+changed content. To review a new match, inspect the matched file and rule,
+verify the source of the rule, then add only that tuple and a specific reason.
+Do not bypass a scanner failure or allow an entire rule collection. Exceptions
+no longer seen fail the scan until they are removed.
+
 Releases from 3.8.3 onward carry `security-report.md` and
 `security-report.json` as assets, attached by
 `.github/workflows/release-security-report.yml` when the release is
@@ -105,9 +129,18 @@ python -m pip install -r security/requirements.txt
 python security/scan.py
 ```
 
+To run the full CI scan locally, install ClamAV, update its signatures with
+`freshclam`, then run (set `CLAMAV_DATABASE` if its database is in a
+nondefault directory):
+
+```bash
+python security/malware_scan.py --out security-report/malware-results.json
+python security/scan.py --malware-results security-report/malware-results.json
+```
+
 ### Limits of the scan
 
-olevba and mraptor match keywords and patterns. They do not run the code,
+All four scanners inspect static content. They do not run the code,
 and a clean report does not prove the code is safe. A second workflow
 (`.github/workflows/vba-analysis.yml`) runs
 [pyVBAanalysis](https://github.com/WilliamSmithEdward/pyVBAanalysis) for

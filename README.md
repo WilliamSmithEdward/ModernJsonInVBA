@@ -233,8 +233,9 @@ implementation-defined choices, and reproduction steps are in
 
 The library makes no API declarations, creates no COM objects, launches no
 processes, and has no network code. Its only file access reads the path you
-pass to `Json_ReadTextFile`. Every push and release is scanned with olevba and mraptor
-against a reviewed baseline. Starting with the release after 3.8.2, each
+pass to `Json_ReadTextFile`. Every push and release is scanned with olevba,
+mraptor, ClamAV, and YARA-X against reviewed findings and exceptions.
+Starting with the release after 3.8.2, each
 release carries the scan report and the SHA-256 of every release file.
 
 One behavior matters for untrusted input: by default a JSON string that

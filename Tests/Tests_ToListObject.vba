@@ -3596,7 +3596,7 @@ End Sub
 '
 ' Notes:
 '   - Incoming headers exclude the formula column.
-'   - This is the highest-value “append mode autofill” contract.
+'   - This is the highest-value "append mode autofill" contract.
 ' =============================================================================
 Public Sub Test_Append_FillsFormulaDown_ForNewRows_WithAsserts()
 
