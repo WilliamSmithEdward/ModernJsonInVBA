@@ -1,0 +1,5 @@
+# The single-file builds are published as release assets exactly as
+# build_dist.py writes them (CRLF, which the VBA editor imports). Check them
+# out with CRLF everywhere so a Linux CI checkout hashes the same bytes that
+# are released.
+dist/*.bas text eol=crlf
