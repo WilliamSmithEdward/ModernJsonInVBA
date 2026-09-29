@@ -12,3 +12,6 @@ Thumbs.db
 
 # security/scan.py output
 security-report/
+
+# Python bytecode
+__pycache__/
