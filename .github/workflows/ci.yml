@@ -1,4 +1,4 @@
-name: VBA analysis
+name: CI
 
 # pyVBAanalysis static checks: compile errors, type errors, undeclared names,
 # and dead code. Installs a reviewed release on every run.
@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   analyze:
+    name: Static analysis
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -49,3 +50,19 @@ jobs:
       - name: Workbook
         if: ${{ !cancelled() }}
         run: pyvbaanalysis ModernJsonInVBA.xlsm --fail-level error
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [analyze]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check every CI job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

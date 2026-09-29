@@ -41,7 +41,7 @@ Follow this order; the version stamps depend on it.
    holds names its source lacks; rebuild the VBA project (save a copy as
    .xlsx, re-import every module, save as .xlsm) and compare sheets and
    cells before replacing the workbook. Also run the four
-   `pyvbaanalysis` commands from `.github/workflows/vba-analysis.yml`.
+   `pyvbaanalysis` commands from `.github/workflows/ci.yml`.
 6. **Commit, tag, release.** Tag `vx.y.z`, push commit and tag, then
    `gh release create vx.y.z` with BOTH `dist/*.bas` files attached as
    assets. Confirm new test files actually appear in the staged list

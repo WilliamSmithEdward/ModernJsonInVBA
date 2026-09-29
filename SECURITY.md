@@ -65,7 +65,8 @@ file from `dist/` instead of using the workbook.
 ## Automated scanning
 
 Every push, pull request, release, and daily scheduled run scans every
-VBA file in the repository (`.github/workflows/security.yml`):
+VBA file in the repository (`.github/workflows/security.yml` for olevba and
+mraptor, `.github/workflows/malware-scan.yml` for ClamAV and YARA-X):
 
 - [olevba](https://github.com/decalage2/oletools/wiki/olevba) flags the
   keywords malicious macros depend on: file and process access, COM
@@ -87,7 +88,7 @@ it. The library, the test suites, and the workbook each have their own list,
 so a finding accepted for the tests is still a failure in the library. The
 scan fails on any finding or URL host not on the list for its group.
 
-The workflow shows ClamAV and YARA-X in their own CI job. It runs
+The Malware scan workflow runs ClamAV and YARA-X, each in its own job:
 [ClamAV](https://docs.clamav.net/manual/Usage/Scanning.html)
 with official signatures refreshed by `freshclam` on each CI run and
 [YARA-X](https://virustotal.github.io/yara-x/docs/api/python/) with the
@@ -104,11 +105,11 @@ signature update, or rule compilation error fails CI.
 
 The pinned YARA Forge release and SHA-256 are in
 [`security/yara-forge.json`](security/yara-forge.json). A weekly workflow
-(`.github/workflows/update-yara-forge.yml`) checks the latest stable release,
+(`.github/workflows/update-yara-rules.yml`) checks the latest stable release,
 downloads the core archive, verifies its published checksum, and proposes
-the new pin in a pull request. It dispatches the existing Security workflow
+the new pin in a pull request. It dispatches the existing Malware scan workflow
 on the draft PR branch so that the new rules scan the repository before review.
-The updater does not accept findings or merge the PR. Check the Security run
+The updater does not accept findings or merge the PR. Check the Malware scan run
 before marking the draft ready or merging it.
 
 The local YARA-X rules mirror ReDim's focused checks for encoded PowerShell,
@@ -154,7 +155,7 @@ python security/scan.py --malware-results security-report/malware-results.json
 
 All four scanners inspect static content. They do not run the code,
 and a clean report does not prove the code is safe. A second workflow
-(`.github/workflows/vba-analysis.yml`) runs
+(`.github/workflows/ci.yml`) runs
 [pyVBAanalysis](https://github.com/WilliamSmithEdward/pyVBAanalysis) for
 compile, type, and dead-code errors; it checks correctness, not intent.
 Reading the source is the stronger check, and the library is short enough

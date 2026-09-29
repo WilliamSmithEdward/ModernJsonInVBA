@@ -1,7 +1,8 @@
 name: Release security report
 
-# When a release is published: run the security scan on the tagged commit,
-# check that the report's SHA-256 hashes match the release's .bas files,
+# When a release is published: run the Security and Malware scan workflows
+# on the tagged commit, merge the olevba, mraptor, ClamAV and YARA-X results
+# into one report, check that the report's SHA-256 hashes match the release's .bas files,
 # and attach security-report.md and security-report.json to the release.
 
 on:
@@ -12,22 +13,44 @@ permissions:
   contents: read
 
 jobs:
-  scan:
+  security:
     uses: ./.github/workflows/security.yml
     with:
       label: ${{ github.event.release.tag_name }}
 
+  malware-scan:
+    uses: ./.github/workflows/malware-scan.yml
+
   attach:
-    needs: scan
+    name: Attach the report
+    needs: [security, malware-scan]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install oletools
+        run: python -m pip install oletools==0.60.2
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: security-report
-          path: security-report
+          pattern: malware-results-*
+          path: malware-results
+          merge-multiple: true
+
+      - name: Write the combined report
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: >
+          python security/scan.py --out security-report --label "$TAG"
+          --malware-results malware-results/malware-results-clamav.json
+          --malware-results malware-results/malware-results-yara-x.json
 
       - name: Check the report's hashes against the release files
         env:

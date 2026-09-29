@@ -4,7 +4,8 @@
 [![GitHub stars](https://img.shields.io/github/stars/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Security scan](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml)
+[![Security](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml)
+[![Malware scan](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml)
 
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \

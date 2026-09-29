@@ -1,4 +1,4 @@
-name: Update YARA Forge rules
+name: Update YARA rules
 
 on:
   schedule:
@@ -8,14 +8,15 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write # Dispatch the existing Security workflow for a GITHUB_TOKEN PR.
+  actions: write # Dispatch the existing Malware scan workflow for a GITHUB_TOKEN PR.
 
 concurrency:
-  group: update-yara-forge
+  group: update-yara-rules
   cancel-in-progress: false
 
 jobs:
-  update:
+  propose:
+    name: Propose a YARA rule update
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -43,16 +44,16 @@ jobs:
           body: |
             Updates the YARA Forge core release and its verified archive SHA-256.
 
-            The existing Security workflow scans this PR branch. Check that run
+            The existing Malware scan workflow scans this PR branch. Check that run
             before marking this draft ready or merging it. Review any new matches
             and document only known acceptable findings as exact exceptions with
             specific reasons. Do not auto-merge this PR.
 
       # GITHUB_TOKEN-created PR events do not reliably start pull_request CI.
       # workflow_dispatch is an explicit exception, so scan the exact PR branch.
-      - name: Scan proposed rules with Security workflow
+      - name: Scan proposed rules with the Malware scan workflow
         if: ${{ steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
-        run: gh workflow run security.yml --ref "$PR_BRANCH"
+        run: gh workflow run malware-scan.yml --ref "$PR_BRANCH"

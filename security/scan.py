@@ -352,10 +352,27 @@ def write_report(out_dir, label, groups, problems):
     return result
 
 
-def add_malware_report(out_dir, malware_path, result):
+def merge_malware_results(paths):
+    """Combine the results of separate ClamAV and YARA-X runs into one."""
+    merged = {"scanners": {}, "yara_forge_url": None, "yara_forge_sha256": None,
+              "files": [], "modules": [], "findings": [], "problems": [],
+              "exceptions_no_longer_seen": []}
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            part = json.load(f)
+        merged["scanners"].update(part["scanners"])
+        for key in ("yara_forge_url", "yara_forge_sha256"):
+            merged[key] = merged[key] or part[key]
+        for key in ("files", "modules"):
+            merged[key] = sorted(set(merged[key]) | set(part[key]))
+        for key in ("findings", "problems", "exceptions_no_longer_seen"):
+            merged[key] += part[key]
+    return merged
+
+
+def add_malware_report(out_dir, malware_paths, result):
     """Merge signature scan results into both report formats."""
-    with open(malware_path, encoding="utf-8") as f:
-        malware = json.load(f)
+    malware = merge_malware_results(malware_paths)
     json_path = os.path.join(out_dir, "security-report.json")
     md_path = os.path.join(out_dir, "security-report.md")
     with open(json_path, encoding="utf-8") as f:
@@ -397,7 +414,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "security-report"))
     ap.add_argument("--label", help="release or ref name for the report title")
     ap.add_argument("--update-baseline", action="store_true")
-    ap.add_argument("--malware-results", help="JSON from security/malware_scan.py")
+    ap.add_argument("--malware-results", action="append",
+                    help="JSON from security/malware_scan.py; repeat for each scanner run")
     args = ap.parse_args()
 
     with open(BASELINE, encoding="utf-8") as f:
