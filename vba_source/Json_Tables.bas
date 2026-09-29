@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Tables
 ' Project:     ModernJsonInVBA
-' Version:     3.8.2
-' Released:    2026-07-09
+' Version:     3.8.3
+' Released:    2026-09-28
 '
 ' Turns parsed/flattened JSON into tabular data:
 '

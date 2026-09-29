@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Coalesce
 ' Project:     ModernJsonInVBA
-' Version:     3.8.2
-' Released:    2026-07-09
+' Version:     3.8.3
+' Released:    2026-09-28
 '
 ' Merges JSON arrays into a single array-of-objects:
 '

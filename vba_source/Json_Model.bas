@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Model
 ' Project:     ModernJsonInVBA
-' Version:     3.8.2
-' Released:    2026-07-09
+' Version:     3.8.3
+' Released:    2026-09-28
 '
 ' The in-memory model contract and its accessors.
 '
@@ -23,8 +23,6 @@ Option Explicit
 ' This module also hosts the minimal JSONPath-style resolvers used by the
 ' table pipeline ("$", ".key", "[0]" - no wildcards, no filters).
 ' =============================================================================
-
-Private Const ERR_SRC As String = "ModernJsonInVBA"
 
 ' =============================================================================
 ' Type checks

@@ -18,21 +18,36 @@ Follow this order; the version stamps depend on it.
 3. **Sync the workbook and run every test suite.** Import the refreshed
    `vba_source/*.bas` modules into `ModernJsonInVBA.xlsm` via Excel COM
    (`VBComponents.Import`; pyOpenVBA can read and replace module source but
-   cannot add modules). Run all `RunAll_*` / `Json_RunAllTests` macros
-   headlessly on a patched copy whose test-module `MsgBox` lines are
-   replaced with `Debug.Print` first. A failing assert raised through a
-   suite runner becomes a modal dialog that hangs headless automation, so
-   drive runs with a timeout and be ready to kill EXCEL.EXE and diagnose
-   per-test.
+   cannot add modules). Run all `RunAll_*` / `Json_RunAllTests` macros on
+   a patched copy whose test-module `MsgBox` lines are replaced with
+   `Debug.Print` first. Drive the runs with pyvbaharness
+   (`pip install pyvbaharness`): a failing assert raised through a suite
+   runner otherwise becomes a modal dialog that hangs headless
+   automation, while the harness returns it as data and kills its own
+   Excel on timeout. Its run targets are capped at 31 characters, so call
+   each runner through a short wrapper procedure.
 4. **Anti-smell scan.** All comments and docs are pure ASCII except
    functional arrows in diagrams: no em/en dashes, smart quotes, ellipsis
    character, or multiplication sign, and no unsupported frequency claims
    ("APIs usually...") in prose. Test-data unicode inside string literals is
    intentional; never "fix" it. Scan with Python, not grep.
-5. **Commit, tag, release.** Tag `vx.y.z`, push commit and tag, then
+5. **Security scan and static analysis.** `python security/scan.py`
+   (needs `pip install -r security/requirements.txt`) must print PASS. A
+   new olevba or mraptor finding fails it; if the finding is benign, run
+   `python security/scan.py --update-baseline`, replace every `TODO` note
+   in `security/baseline.json` with the real reason, and review the diff.
+   Never accept a finding in the `library` group without reading the code
+   that triggers it. "Possible VBA stomping" means the workbook's p-code
+   holds names its source lacks; rebuild the VBA project (save a copy as
+   .xlsx, re-import every module, save as .xlsm) and compare sheets and
+   cells before replacing the workbook. Also run the four
+   `pyvbaanalysis` commands from `.github/workflows/vba-analysis.yml`.
+6. **Commit, tag, release.** Tag `vx.y.z`, push commit and tag, then
    `gh release create vx.y.z` with BOTH `dist/*.bas` files attached as
    assets. Confirm new test files actually appear in the staged list
-   (`A Tests/...`) before pushing.
+   (`A Tests/...`) before pushing. Publishing the release triggers
+   `.github/workflows/security.yml`, which attaches `security-report.md`
+   and `security-report.json`; check they appear on the release.
 
 ## Project constraints
 
@@ -57,3 +72,5 @@ Follow this order; the version stamps depend on it.
 - `Tests/` - repo test suites, imported into the workbook beside the
   workbook-only legacy suites (`Tests_JsonParser_` and friends)
 - `ModernJsonInVBA.xlsm` - the shipping workbook with all modules and tests
+- `security/` - olevba/mraptor scan script and its reviewed baseline; see
+  SECURITY.md

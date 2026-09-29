@@ -1,0 +1,51 @@
+name: VBA analysis
+
+# pyVBAanalysis static checks: compile errors, type errors, undeclared names,
+# and dead code. Installs the latest release on every run.
+#
+# vba_source/ is analyzed as one project, so the whole-project checks
+# (undeclared variables, unknown calls, missing members) run there. Each
+# dist/ build is a single module, which pyVBAanalysis always treats as a
+# partial project, so those runs cover the per-module checks only. The
+# workbook fails on errors only: its legacy test and example modules carry
+# dead-code and Option Explicit notes that are reported but not gated.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the latest pyVBAanalysis
+        run: |
+          python -m pip install --upgrade pyvbaanalysis
+          pyvbaanalysis --version
+
+      - name: Library sources
+        run: pyvbaanalysis vba_source
+
+      - name: Single-file build, all O365 hosts
+        if: ${{ !cancelled() }}
+        run: pyvbaanalysis dist/ModernJsonInVBA_AllO365.bas
+
+      - name: Single-file build, Excel
+        if: ${{ !cancelled() }}
+        run: pyvbaanalysis dist/ModernJsonInVBA_Excel.bas
+
+      - name: Workbook
+        if: ${{ !cancelled() }}
+        run: pyvbaanalysis ModernJsonInVBA.xlsm --fail-level error

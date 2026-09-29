@@ -9,3 +9,6 @@
 Thumbs.db
 
 .claude
+
+# security/scan.py output
+security-report/

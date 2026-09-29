@@ -4,6 +4,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Security scan](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml)
 
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
@@ -31,6 +32,7 @@ Take nested or complex API payloads and  convert them into normalized Excel tabl
   - [Timings (seconds)](#timings-seconds)
   - [Reproducing these numbers](#reproducing-these-numbers)
 - [Conformance](#conformance)
+- [Security](#security)
 - [Installation](#installation)
   - [Option 1: Single file, Excel](#option-1-single-file-excel-recommended)
   - [Option 2: Single file, all O365 apps](#option-2-single-file-all-o365-apps-word-powerpoint-access-excel)
@@ -226,6 +228,20 @@ whose point is invalid bytes rather than invalid JSON exercise
 validation, UTF-16 LE/BE by BOM, ANSI fallback for legacy files). Results,
 implementation-defined choices, and reproduction steps are in
 [CONFORMANCE.md](CONFORMANCE.md).
+
+## Security
+
+The library makes no API declarations, creates no COM objects, launches no
+processes, and has no network code. Its only file access reads the path you
+pass to `Json_ReadTextFile`. Every push and release is scanned with olevba and mraptor
+against a reviewed baseline. Starting with the release after 3.8.2, each
+release carries the scan report and the SHA-256 of every release file.
+
+One behavior matters for untrusted input: by default a JSON string that
+begins with `=` is written to Excel as a live formula. Pass
+`formulaStringsAsText:=True` to the upsert functions to write every value
+and header as plain text instead. [SECURITY.md](SECURITY.md) covers this,
+how to report a vulnerability privately, and the limits of the scan.
 
 ## Installation
 
@@ -919,16 +935,18 @@ Errors protect against:
 - `Public Function Excel_GetListObject(ByVal ws As Worksheet, ByVal tableName As String) As ListObject`  
   Finds a `ListObject` by name on a worksheet.
 
-- `Public Function Excel_EnsureListObject(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant) As ListObject`  
+- `Public Function Excel_EnsureListObject(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, Optional ByVal formulaStringsAsText As Boolean = False) As ListObject`  
   Ensures a table exists. Creates it if missing using the supplied header list and top-left anchor.
 
-- `Public Function Excel_UpsertListObjectOnSheet(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, ByVal data2D As Variant, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True) As ListObject`  
+- `Public Function Excel_UpsertListObjectOnSheet(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal headers As Variant, ByVal data2D As Variant, Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal formulaStringsAsText As Boolean = False) As ListObject`  
   Core Excel upsert entry point for writing headers and a 2D array into a `ListObject`, with schema evolution and formula-preservation options. Returns the created or updated `ListObject`.
 
-- `Public Sub Excel_ResizeTableToRowCol(ByVal lo As ListObject, ByVal finalHeaders As Variant, ByVal bodyRowCount As Long)`  
+  `formulaStringsAsText` (on every upsert function): by default a text value or header that begins with `=` is entered as a formula, as if typed, and a leading apostrophe is consumed. Pass `True` for payloads you do not control: values and headers that begin with `=` or `'` are then written as the exact text, and nothing from the payload is evaluated. Formula columns you added to the table are still preserved. See [SECURITY.md](SECURITY.md).
+
+- `Public Sub Excel_ResizeTableToRowCol(ByVal lo As ListObject, ByVal finalHeaders As Variant, ByVal bodyRowCount As Long, Optional ByVal formulaStringsAsText As Boolean = False)`  
   Resizes a `ListObject` to the requested header/body shape while handling Excel table materialization edge cases.
 
-- `Public Function Excel_UpsertListObjectFromJsonAtRoot(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal jsonText As String, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False) As ListObject`  
+- `Public Function Excel_UpsertListObjectFromJsonAtRoot(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal jsonText As String, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False, Optional ByVal formulaStringsAsText As Boolean = False) As ListObject`  
   High-level JSON-to-table ingestion entry point. Parses JSON, resolves a root array-of-objects, shapes rows and headers, then upserts into Excel. `tableRoot` defaults to `"$"` (the document root); pass a JSONPath such as `"$.data.items"` when the rows are nested under a key. Both the document root and simple nested roots stream directly into the table without building the object model; bracket-index paths resolve through the model. Returns the created or updated `ListObject`.
 
 - `Public Function Excel_ListObjectToJson(ByVal lo As ListObject, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
@@ -937,7 +955,7 @@ Errors protect against:
 - `Public Function Excel_RangeToJson(ByVal rng As Range, Optional ByVal hasHeaderRow As Boolean = True, Optional ByVal includeBlanksAsNull As Boolean = False, Optional ByVal parseJsonInCells As Boolean = False, Optional ByVal parseArraysOnly As Boolean = False, Optional ByVal preserveFormulas As Boolean = False) As String`  
   Converts a worksheet range into a JSON array-of-objects, the same way `Excel_ListObjectToJson` handles a table. The first row supplies headers unless `hasHeaderRow` is False, in which case columns are named `Column1`, `Column2`, and so on.
 
-- `Public Function Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False) As ListObject`  
+- `Public Function Excel_UpsertListObjectFromSource(ByVal ws As Worksheet, ByVal tableName As String, ByVal topLeft As Range, ByVal sourceText As String, ByVal format As ExcelSourceFormat, Optional ByVal tableRoot As String = "$", Optional ByVal clearExisting As Boolean = True, Optional ByVal addMissingColumns As Boolean = True, Optional ByVal removeMissingColumns As Boolean = False, Optional ByVal preserveFormulaColumns As Boolean = True, Optional ByVal fillFormulasOnAppend As Boolean = True, Optional ByVal nonTableArraysAsJson As Boolean = False, Optional ByVal formulaStringsAsText As Boolean = False) As ListObject`  
   Unified ingestion entry point for JSON, CSV, or XML source text. Converts the source into JSON and routes through the deterministic Excel upsert pipeline. Returns the created or updated `ListObject`.
 
 ### CSV / XML / NDJSON Adapters

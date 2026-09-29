@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Ndjson
 ' Project:     ModernJsonInVBA
-' Version:     3.8.2
-' Released:    2026-07-09
+' Version:     3.8.3
+' Released:    2026-09-28
 '
 ' NDJSON (newline-delimited JSON, also called JSON Lines) to JSON conversion.
 '

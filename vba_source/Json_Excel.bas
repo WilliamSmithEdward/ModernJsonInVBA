@@ -4,8 +4,8 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Excel
 ' Project:     ModernJsonInVBA
-' Version:     3.8.2
-' Released:    2026-07-09
+' Version:     3.8.3
+' Released:    2026-09-28
 '
 ' Excel ListObject ingestion: deterministic loading of JSON/CSV/XML into
 ' tables. The reverse direction (tables/ranges back to JSON) lives in
@@ -21,6 +21,9 @@ Option Explicit
 '     across runs.
 '   - Schema evolution is explicit: addMissingColumns / removeMissingColumns.
 '   - Formula columns can be preserved across refreshes and filled on append.
+'   - Text values that begin with "=" are written as formulas unless
+'     formulaStringsAsText=True, which writes every value and header
+'     exactly as text. Set it for payloads you do not control.
 '   - The table body is written with a single Range assignment (verified
 '     stable to millions of cells); a block-write fallback engages only if
 '     that write raises on a memory-constrained host.
@@ -68,12 +71,14 @@ End Function
 
 ' Return the named ListObject, creating it at topLeft with the given headers
 ' (validated for blanks/duplicates) when it does not exist. A new table is
-' created with a header row only; the body is empty.
+' created with a header row only; the body is empty. formulaStringsAsText:
+' see Excel_UpsertListObjectOnSheet.
 Public Function Excel_EnsureListObject( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
     ByVal topLeft As Range, _
-    ByVal headers As Variant _
+    ByVal headers As Variant, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 ) As ListObject
 
     Dim lo As ListObject
@@ -88,7 +93,7 @@ Public Function Excel_EnsureListObject( _
         Dim headerRange As Range
         Set headerRange = ws.Range(topLeft, topLeft.Offset(0, colCount - 1))
 
-        headerRange.Value2 = Excel_HeadersTo2D(headers)
+        headerRange.Value2 = Excel_HeadersTo2D(headers, formulaStringsAsText)
 
         Set lo = ws.ListObjects.Add(SourceType:=xlSrcRange, Source:=headerRange, XlListObjectHasHeaders:=xlYes)
         lo.name = tableName
@@ -104,6 +109,13 @@ End Function
 ' Create-or-update the named table with the given headers and 2D data, and
 ' return the created or updated ListObject. See Excel_ListObjectUpsertData for
 ' the schema-evolution semantics.
+'
+' formulaStringsAsText:
+'   False => a text value or header beginning with "=" is entered as a
+'            formula, as if typed (and a leading apostrophe is consumed)
+'   True  => text values and headers beginning with "=" or "'" are
+'            written with an apostrophe prefix, so the cell holds the
+'            text exactly and nothing from the payload is evaluated
 Public Function Excel_UpsertListObjectOnSheet( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
@@ -114,18 +126,19 @@ Public Function Excel_UpsertListObjectOnSheet( _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
-    Optional ByVal fillFormulasOnAppend As Boolean = True _
+    Optional ByVal fillFormulasOnAppend As Boolean = True, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 ) As ListObject
     Dim lo As ListObject
     Set lo = Excel_GetListObject(ws, tableName)
 
     If lo Is Nothing Then
-        Set lo = Excel_EnsureListObject(ws, tableName, topLeft, headers)
+        Set lo = Excel_EnsureListObject(ws, tableName, topLeft, headers, formulaStringsAsText)
     End If
 
     Excel_ListObjectUpsertData lo, headers, data2D, _
         clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend
+        preserveFormulaColumns, fillFormulasOnAppend, formulaStringsAsText
 
     Set Excel_UpsertListObjectOnSheet = lo
 End Function
@@ -147,7 +160,8 @@ Private Sub Excel_ListObjectUpsertData( _
     Optional ByVal addMissingColumns As Boolean = True, _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
-    Optional ByVal fillFormulasOnAppend As Boolean = True _
+    Optional ByVal fillFormulasOnAppend As Boolean = True, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 )
     Const ERR_SRC As String = "Excel_ListObjectUpsertData"
     Const ERR_SHEET_BOUNDS As Long = vbObjectError + 1102
@@ -337,7 +351,11 @@ Private Sub Excel_ListObjectUpsertData( _
 
     Dim header2D As Variant
     If writeHeaders Then
-        header2D = Excel_HeadersTo2D(finalHeaders)
+        header2D = Excel_HeadersTo2D(finalHeaders, formulaStringsAsText)
+    End If
+
+    If formulaStringsAsText And newBodyRows > 0 Then
+        Excel_QuoteFormulaStrings finalData
     End If
 
     ' ---- Write ----
@@ -352,7 +370,7 @@ Private Sub Excel_ListObjectUpsertData( _
             End If
         End If
 
-        Excel_ResizeTableToRowCol lo, finalHeaders, newBodyRows
+        Excel_ResizeTableToRowCol lo, finalHeaders, newBodyRows, formulaStringsAsText
 
         If writeHeaders Then
             lo.HeaderRowRange.Value2 = header2D
@@ -371,7 +389,7 @@ Private Sub Excel_ListObjectUpsertData( _
         Dim startRow As Long
         startRow = oldBodyRows
 
-        Excel_ResizeTableToRowCol lo, finalHeaders, targetBodyRows
+        Excel_ResizeTableToRowCol lo, finalHeaders, targetBodyRows, formulaStringsAsText
 
         If writeHeaders Then
             lo.HeaderRowRange.Value2 = header2D
@@ -475,11 +493,13 @@ End Sub
 ' Excel does not always materialize body rows after Resize; missing rows are
 ' added explicitly. For bodyRowCount = 0 a temporary body row is used during
 ' the resize and then deleted, which is the only reliable way to shrink a
-' table to header-only.
+' table to header-only. formulaStringsAsText: see
+' Excel_UpsertListObjectOnSheet.
 Public Sub Excel_ResizeTableToRowCol( _
     ByVal lo As ListObject, _
     ByVal finalHeaders As Variant, _
-    ByVal bodyRowCount As Long _
+    ByVal bodyRowCount As Long, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 )
     If Not lo.ShowHeaders Then lo.ShowHeaders = True
     If lo.HeaderRowRange Is Nothing Then
@@ -501,7 +521,7 @@ Public Sub Excel_ResizeTableToRowCol( _
 
     If bodyRowCount <= 0 Then
         If Not lo.DataBodyRange Is Nothing Then lo.DataBodyRange.Delete
-        lo.HeaderRowRange.Value2 = Excel_HeadersTo2D(finalHeaders)
+        lo.HeaderRowRange.Value2 = Excel_HeadersTo2D(finalHeaders, formulaStringsAsText)
         Exit Sub
     End If
 
@@ -539,6 +559,9 @@ End Sub
 ' nonTableArraysAsJson:
 '   False => nested arrays inside rows are excluded (prevents explosion)
 '   True  => nested arrays are stored as JSON text in their cell
+'
+' formulaStringsAsText: see Excel_UpsertListObjectOnSheet. Set it when
+' jsonText comes from a source you do not control.
 Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     ByVal ws As Worksheet, _
     ByVal tableName As String, _
@@ -550,7 +573,8 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
-    Optional ByVal nonTableArraysAsJson As Boolean = False _
+    Optional ByVal nonTableArraysAsJson As Boolean = False, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 ) As ListObject
     Const SRC As String = "Excel_UpsertListObjectFromJsonAtRoot"
 
@@ -703,7 +727,7 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
             ws, tableName, topLeft, _
             headersOut, emptyData, _
             clearExisting, addMissingColumns, removeMissingColumns, _
-            preserveFormulaColumns, fillFormulasOnAppend)
+            preserveFormulaColumns, fillFormulasOnAppend, formulaStringsAsText)
 
         Exit Function
     End If
@@ -713,7 +737,7 @@ Public Function Excel_UpsertListObjectFromJsonAtRoot( _
         ws, tableName, topLeft, _
         headersOut, data, _
         clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend)
+        preserveFormulaColumns, fillFormulasOnAppend, formulaStringsAsText)
 
     Erase data
     Exit Function
@@ -764,7 +788,8 @@ Public Function Excel_UpsertListObjectFromSource( _
     Optional ByVal removeMissingColumns As Boolean = False, _
     Optional ByVal preserveFormulaColumns As Boolean = True, _
     Optional ByVal fillFormulasOnAppend As Boolean = True, _
-    Optional ByVal nonTableArraysAsJson As Boolean = False _
+    Optional ByVal nonTableArraysAsJson As Boolean = False, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
 ) As ListObject
     Const ERR_SRC As String = "Excel_UpsertListObjectFromSource"
 
@@ -791,7 +816,8 @@ Public Function Excel_UpsertListObjectFromSource( _
     Set Excel_UpsertListObjectFromSource = Excel_UpsertListObjectFromJsonAtRoot( _
         ws, tableName, topLeft, jsonText, resolvedRoot, _
         clearExisting, addMissingColumns, removeMissingColumns, _
-        preserveFormulaColumns, fillFormulasOnAppend, nonTableArraysAsJson)
+        preserveFormulaColumns, fillFormulasOnAppend, nonTableArraysAsJson, _
+        formulaStringsAsText)
 End Function
 
 ' =============================================================================
@@ -1100,7 +1126,10 @@ Private Function Excel_ReshapeDataToHeaders( _
     Excel_ReshapeDataToHeaders = outArr
 End Function
 
-Private Function Excel_HeadersTo2D(ByVal headers As Variant) As Variant
+Private Function Excel_HeadersTo2D( _
+    ByVal headers As Variant, _
+    Optional ByVal formulaStringsAsText As Boolean = False _
+) As Variant
     Dim lb As Long
     Dim ub As Long
     lb = LBound(headers)
@@ -1114,8 +1143,32 @@ Private Function Excel_HeadersTo2D(ByVal headers As Variant) As Variant
         outArr(1, i - lb + 1) = CStr(headers(i))
     Next i
 
+    If formulaStringsAsText Then Excel_QuoteFormulaStrings outArr
     Excel_HeadersTo2D = outArr
 End Function
+
+' Prefix an apostrophe to every string in a 2D array that begins with "="
+' or "'". A Range assignment treats each string like typed input: "=..."
+' becomes a formula and a leading apostrophe is consumed as the text
+' marker. With the prefix, the cell holds the original text exactly.
+Private Sub Excel_QuoteFormulaStrings(ByRef data2D As Variant)
+    Dim r As Long
+    Dim c As Long
+    Dim first As Long
+
+    For r = LBound(data2D, 1) To UBound(data2D, 1)
+        For c = LBound(data2D, 2) To UBound(data2D, 2)
+            If VarType(data2D(r, c)) = vbString Then
+                If LenB(data2D(r, c)) > 0 Then
+                    first = AscW(data2D(r, c))
+                    If first = 61 Or first = 39 Then   ' "=" or "'"
+                        data2D(r, c) = "'" & data2D(r, c)
+                    End If
+                End If
+            End If
+        Next c
+    Next r
+End Sub
 
 ' True for the schema the pipeline generates when a result has zero rows
 ' and no discovered columns: exactly one header named "value".

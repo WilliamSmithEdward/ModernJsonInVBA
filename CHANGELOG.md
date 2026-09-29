@@ -4,6 +4,38 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.3] - 2026-09-28
+
+### Added
+
+- `formulaStringsAsText` optional parameter on `Excel_UpsertListObjectOnSheet`,
+  `Excel_UpsertListObjectFromJsonAtRoot`, `Excel_UpsertListObjectFromSource`,
+  `Excel_EnsureListObject`, and `Excel_ResizeTableToRowCol`. When True,
+  values and headers that begin with `=` or `'` are written as the exact
+  text, so an untrusted payload cannot place a live formula in the
+  workbook. The default (False) keeps the existing behavior. New
+  `Tests_FormulaText` suite.
+- SECURITY.md: how to report a vulnerability privately, what the library
+  code does and does not do, and how to load JSON you do not trust.
+- olevba and mraptor security scan in CI (`.github/workflows/security.yml`)
+  over every VBA file, checked against a reviewed baseline in `security/`.
+  Each mraptor match is checked individually, not just its verdict. olevba's
+  VBA-stomping flag is verified name by name instead of allowlisted. Each
+  published release gets `security-report.md` and `security-report.json`
+  attached, including the SHA-256 of every release file.
+- pyVBAanalysis static checks in CI (`.github/workflows/vba-analysis.yml`),
+  using the latest pyVBAanalysis release on each run.
+
+### Changed
+
+- The workbook's VBA project was rebuilt from its module sources. Its
+  compiled p-code held three names from long-deleted code, which the
+  stomping check reports. Sheets, tables, and every cell are unchanged.
+
+### Removed
+
+- An unused private constant in `Json_Model`.
+
 ## [3.8.2] - 2026-07-09
 
 ### Changed
@@ -234,6 +266,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.3]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.3
 [3.8.2]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.2
 [3.8.1]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.1
 [3.8.0]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.0
