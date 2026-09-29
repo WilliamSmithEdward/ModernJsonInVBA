@@ -1,7 +1,7 @@
 name: VBA analysis
 
 # pyVBAanalysis static checks: compile errors, type errors, undeclared names,
-# and dead code. Installs the latest release on every run.
+# and dead code. Installs a reviewed release on every run.
 #
 # vba_source/ is analyzed as one project, so the whole-project checks
 # (undeclared variables, unknown calls, missing members) run there. Each
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,9 +30,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install the latest pyVBAanalysis
+      - name: Install pyVBAanalysis 2.3.1
         run: |
-          python -m pip install --upgrade pyvbaanalysis
+          python -m pip install pyvbaanalysis==2.3.1
           pyvbaanalysis --version
 
       - name: Library sources

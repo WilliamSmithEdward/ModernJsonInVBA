@@ -4,7 +4,7 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Transforms
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Structural transforms over the parsed model:

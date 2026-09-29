@@ -4,7 +4,7 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Serializer
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Serializes the library's in-memory JSON model back to JSON text.

@@ -4,7 +4,7 @@ Option Explicit
 ' ============================================================================
 ' ModernJsonInVBA - single-file distribution
 '
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 ' Repo:        https://github.com/WilliamSmithEdward/ModernJsonInVBA
 '
@@ -177,7 +177,7 @@ Private Const Json_Xml_ERR_SRC As String = "XmlTextToJson"
 ' =============================================================================
 ' Module:      Json_Common
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Shared foundation for all ModernJsonInVBA modules: the object-tag constant,
@@ -835,7 +835,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Parser
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Recursive-descent JSON parser producing the library's in-memory model:
@@ -2189,7 +2189,7 @@ End Sub
 ' =============================================================================
 ' Module:      Json_Serializer
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Serializes the library's in-memory JSON model back to JSON text.
@@ -2847,7 +2847,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Model
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' The in-memory model contract and its accessors.
@@ -3171,7 +3171,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Transforms
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Structural transforms over the parsed model:
@@ -3651,7 +3651,7 @@ End Sub
 ' =============================================================================
 ' Module:      Json_Tables
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Turns parsed/flattened JSON into tabular data:
@@ -4196,7 +4196,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Coalesce
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Merges JSON arrays into a single array-of-objects:
@@ -4468,7 +4468,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Csv
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' CSV -> JSON conversion.
@@ -4737,7 +4737,7 @@ End Sub
 ' =============================================================================
 ' Module:      Json_Xml
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' XML -> JSON conversion using a lightweight pure-VBA parser (no MSXML, so
@@ -5253,7 +5253,7 @@ End Function
 ' =============================================================================
 ' Module:      Json_Ndjson
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' NDJSON (newline-delimited JSON, also called JSON Lines) to JSON conversion.

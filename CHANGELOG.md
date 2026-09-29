@@ -4,6 +4,17 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.5] - 2026-09-29
+
+### Changed
+
+- Pin the security and static-analysis CI runners to Ubuntu 24.04 and
+  pyVBAanalysis to version 2.3.1. GitHub Actions and the security Python
+  packages remain pinned to exact versions or commit IDs.
+- Pin the YARA Forge core collection to its 2026-09-27 release and verify
+  the downloaded archive's SHA-256 before compiling its rules. ClamAV
+  signatures continue to update so scans cover newly published threats.
+
 ## [3.8.4] - 2026-09-29
 
 ### Added
@@ -278,6 +289,7 @@ table and method.
 - A 500,000-row, 110 MB document loads into a ListObject in about 18 seconds on
   the benchmark machine.
 
+[3.8.5]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.5
 [3.8.4]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.4
 [3.8.3]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.3
 [3.8.2]: https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/tag/v3.8.2

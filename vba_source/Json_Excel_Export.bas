@@ -4,7 +4,7 @@ Option Explicit
 ' =============================================================================
 ' Module:      Json_Excel_Export
 ' Project:     ModernJsonInVBA
-' Version:     3.8.4
+' Version:     3.8.5
 ' Released:    2026-09-29
 '
 ' Excel -> JSON export: the reverse direction of Json_Excel's ingestion.
