@@ -1,6 +1,6 @@
 name: Security scan
 
-# olevba, mraptor, ClamAV, and YARA-X scan of every VBA file.
+# Separate ClamAV/YARA-X and olevba/mraptor jobs scan every VBA file.
 # Runs on pushes and pull requests. release-security-report.yml calls it
 # when a release is published and attaches the report. See SECURITY.md.
 
@@ -20,13 +20,12 @@ permissions:
   contents: read
 
 jobs:
-  scan:
+  malware:
+    name: ClamAV and YARA-X
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0 # git describe needs tags for the report label
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -44,6 +43,37 @@ jobs:
 
       - name: Scan malware signatures
         run: python security/malware_scan.py --out security-report/malware-results.json
+
+      - name: Upload malware results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: malware-results
+          path: security-report/malware-results.json
+          if-no-files-found: error
+
+  scan:
+    name: olevba and mraptor
+    needs: malware
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # git describe needs tags for the report label
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install oletools
+        run: python -m pip install oletools==0.60.2
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: malware-results
+          path: security-report
 
       - name: Scan
         env:

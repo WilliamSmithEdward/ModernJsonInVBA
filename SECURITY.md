@@ -87,7 +87,8 @@ it. The library, the test suites, and the workbook each have their own list,
 so a finding accepted for the tests is still a failure in the library. The
 scan fails on any finding or URL host not on the list for its group.
 
-The same workflow also runs [ClamAV](https://docs.clamav.net/manual/Usage/Scanning.html)
+The workflow shows ClamAV and YARA-X in their own CI job. It runs
+[ClamAV](https://docs.clamav.net/manual/Usage/Scanning.html)
 with freshly updated official signatures and [YARA-X](https://virustotal.github.io/yara-x/docs/api/python/)
 with the pinned [YARA Forge core collection](https://github.com/YARAHQ/yara-forge/releases/tag/20260927).
 It scans the twelve source modules, both generated builds, test modules,
