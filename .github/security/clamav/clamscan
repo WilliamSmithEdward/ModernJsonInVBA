@@ -1,0 +1,11 @@
+#!/bin/sh
+# clamscan from the pinned image built from the Dockerfile beside this file.
+# The workspace and the runner's temp directory are mounted at their own
+# paths, so paths the caller passes resolve the same inside the container.
+# Signatures come from the clamav-db volume that freshclam fills.
+exec docker run --rm --entrypoint clamscan \
+  --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
+  --volume "$RUNNER_TEMP:$RUNNER_TEMP:ro" \
+  --volume clamav-db:/var/lib/clamav \
+  --workdir "$PWD" \
+  clamav-pinned "$@"
