@@ -37,7 +37,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install oletools
-        run: python -m pip install oletools==0.60.2
+        run: python -m pip install -c security/requirements.txt oletools
 
       - name: Scan
         env:

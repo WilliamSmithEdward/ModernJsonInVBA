@@ -31,9 +31,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install pyVBAanalysis 2.3.1
+      - name: Install pyVBAanalysis
         run: |
-          python -m pip install pyvbaanalysis==2.3.1
+          python -m pip install -c security/requirements.txt pyvbaanalysis
           pyvbaanalysis --version
 
       - name: Library sources
