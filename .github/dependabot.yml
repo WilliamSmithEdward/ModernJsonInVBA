@@ -7,14 +7,23 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
   # .github/requirements holds the hash-locked tools each workflow installs.
   - package-ecosystem: pip
     directory: /.github/requirements
     schedule:
-      interval: weekly
+      interval: daily
     cooldown:
       default-days: 7
+      exclude: [pyopenvba, pyofficeeditor, pyprettyvba, pyvbareference, pyvbaanalysis, pyvbaharness, xlide-mcp]
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
   # The ClamAV engine the malware scan runs, pinned by digest.
   - package-ecosystem: docker
@@ -23,3 +32,7 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
