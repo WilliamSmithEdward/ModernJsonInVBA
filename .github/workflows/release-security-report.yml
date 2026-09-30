@@ -4,10 +4,20 @@ name: Release security report
 # on the tagged commit, merge the olevba, mraptor, ClamAV and YARA-X results
 # into one report, check that the report's SHA-256 hashes match the release's .bas files,
 # and attach security-report.md and security-report.json to the release.
+#
+# Started by hand it is always a dry run: it scans the commit it was started
+# on, checks the report against the named release's .bas files, and uploads
+# the report as the release-preview artifact instead of attaching it.
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release whose .bas files the report is checked against, such as v3.8.5
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,7 +31,7 @@ jobs:
       contents: read
       security-events: write
     with:
-      label: ${{ github.event.release.tag_name }}
+      label: ${{ github.event.release.tag_name || inputs.tag }}
 
   malware-scan:
     name: Malware scan
@@ -54,7 +64,7 @@ jobs:
 
       - name: Write the combined report
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: >
           python security/scan.py --out security-report --label "$TAG"
           --malware-results malware-results/malware-results-clamav.json
@@ -63,7 +73,7 @@ jobs:
       - name: Check the report's hashes against the release files
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           gh release download "$TAG" --pattern "*.bas" --dir assets --repo "$GITHUB_REPOSITORY"
           python3 - <<'EOF'
@@ -81,7 +91,16 @@ jobs:
           sys.exit(1 if bad else 0)
           EOF
 
+      - name: Keep what the release would carry
+        if: ${{ !cancelled() && github.event_name != 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-preview
+          path: security-report/
+          if-no-files-found: error
+
       - name: Attach report to the release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
