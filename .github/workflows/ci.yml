@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 jobs:
-  analyze:
+  static-analysis:
     name: Static analysis
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -54,7 +54,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: always()
-    needs: [analyze]
+    needs: [static-analysis]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

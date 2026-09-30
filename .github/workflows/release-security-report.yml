@@ -14,15 +14,17 @@ permissions:
 
 jobs:
   security:
+    name: Security
     uses: ./.github/workflows/security.yml
     with:
       label: ${{ github.event.release.tag_name }}
 
   malware-scan:
+    name: Malware scan
     uses: ./.github/workflows/malware-scan.yml
 
-  attach:
-    name: Attach the report
+  release-report:
+    name: Attach release report
     needs: [security, malware-scan]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
