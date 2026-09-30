@@ -103,14 +103,13 @@ archive SHA-256, every match, and scan errors. The download must match the
 pinned archive SHA-256 before its rules are compiled. An unavailable scanner, failed
 signature update, or rule compilation error fails CI.
 
-The pinned YARA Forge release and SHA-256 are in
-[`security/yara-forge.json`](security/yara-forge.json). A weekly workflow
-(`.github/workflows/update-yara-rules.yml`) checks the latest stable release,
-downloads the core archive, verifies its published checksum, and proposes
-the new pin in a pull request. It dispatches the existing Malware scan workflow
-on the draft PR branch so that the new rules scan the repository before review.
-The updater does not accept findings or merge the PR. Check the Malware scan run
-before marking the draft ready or merging it.
+The pinned YARA Forge release, URL and SHA-256 are in
+[`.github/security/yara.json`](.github/security/yara.json). A weekly workflow
+(`.github/workflows/update-yara-rules.yml`) takes the newest stable release,
+with the SHA-256 GitHub records for the core archive, and proposes the new pin
+in a pull request. It starts CI, Security and Malware scan on the PR branch so
+that the new rules scan the repository before review. The updater does not
+accept findings or merge the PR. Check the Malware scan run before merging it.
 
 The local YARA-X rules mirror ReDim's focused checks for encoded PowerShell,
 remote execution through Windows binaries, and Office Run key persistence.
