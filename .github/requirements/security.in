@@ -1,0 +1,5 @@
+# Security scan tools: olevba and mraptor from oletools.
+# Compile from this directory with:
+#   uv pip compile security.in --universal --generate-hashes --python-version 3.13 -o security.txt
+# Dependabot proposes each new release.
+oletools==0.60.2

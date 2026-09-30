@@ -37,7 +37,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install oletools
-        run: python -m pip install -c security/requirements.txt oletools
+        run: python -m pip install --require-hashes -r .github/requirements/security.txt
 
       - name: Scan
         env:

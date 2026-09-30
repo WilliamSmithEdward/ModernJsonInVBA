@@ -33,7 +33,7 @@ jobs:
 
       - name: Install pyVBAanalysis
         run: |
-          python -m pip install -c security/requirements.txt pyvbaanalysis
+          python -m pip install --require-hashes -r .github/requirements/ci.txt
           pyvbaanalysis --version
 
       - name: Library sources

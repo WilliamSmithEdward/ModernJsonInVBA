@@ -32,7 +32,8 @@ Follow this order; the version stamps depend on it.
    ("APIs usually...") in prose. Test-data unicode inside string literals is
    intentional; never "fix" it. Scan with Python, not grep.
 5. **Security scan and static analysis.** `python security/scan.py`
-   (needs `pip install -r security/requirements.txt`) must print PASS. A
+   (needs `pip install --require-hashes -r
+   .github/requirements/security.txt`) must print PASS. A
    new olevba or mraptor finding fails it; if the finding is benign, run
    `python security/scan.py --update-baseline`, replace every `TODO` note
    in `security/baseline.json` with the real reason, and review the diff.

@@ -138,12 +138,13 @@ Get-FileHash .\ModernJsonInVBA_Excel.bas -Algorithm SHA256
 To run the same scan locally:
 
 ```bash
-python -m pip install -r security/requirements.txt
+python -m pip install --require-hashes -r .github/requirements/security.txt
 python security/scan.py
 ```
 
 To run the full CI scan locally, install ClamAV, update its signatures with
-`freshclam`, then run (set `CLAMAV_DATABASE` if its database is in a
+`freshclam`, install `.github/requirements/malware.txt` the same way, then
+run (set `CLAMAV_DATABASE` if its database is in a
 nondefault directory):
 
 ```bash

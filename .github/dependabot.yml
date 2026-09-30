@@ -8,9 +8,9 @@ updates:
     cooldown:
       default-days: 7
 
-  # security/requirements.txt pins the scanners the Malware scan installs.
+  # .github/requirements holds the hash-locked tools each workflow installs.
   - package-ecosystem: pip
-    directory: /security
+    directory: /.github/requirements
     schedule:
       interval: weekly
     cooldown:
