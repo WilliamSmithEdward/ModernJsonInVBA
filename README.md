@@ -1,12 +1,13 @@
 # ModernJsonInVBA
 
-[![JSONTestSuite](https://img.shields.io/badge/JSONTestSuite-passing-brightgreen)](CONFORMANCE.md)
-[![GitHub stars](https://img.shields.io/github/stars/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/commits/main)
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/ModernJsonInVBA)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WilliamSmithEdward/ModernJsonInVBA/total)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/releases)
+[![CI](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/ci.yml)
 [![Security](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml)
 [![Malware scan](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/WilliamSmithEdward/ModernJsonInVBA/badge)](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ModernJsonInVBA)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/blob/main/LICENSE)
+[![JSONTestSuite](https://img.shields.io/badge/JSONTestSuite-passing-brightgreen)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/blob/main/CONFORMANCE.md)
 
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
