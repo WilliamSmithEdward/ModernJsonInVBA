@@ -168,8 +168,9 @@ A baseline entry matches a finding's kind and keyword within one group, and
 every entry has a note saying why it is there. Each group has its own list,
 so a finding accepted for the tests is still a failure in the library. Each
 group also lists the URL hosts its files may name; any other host fails the
-scan. Baseline entries are not tied to a file's content, and an entry that
-is no longer seen is reported, not failed.
+scan. Baseline entries are not tied to a file's content. An entry that is
+no longer seen fails the scan, with a message naming the entry and its
+group; remove it from the baseline.
 
 A malware exception matches the exact scanner, signature, file path and
 file SHA-256, so a changed file needs another review, and an exception

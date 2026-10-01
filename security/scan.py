@@ -23,8 +23,9 @@ acceptable in the library:
 
 The scan fails when a group shows a finding its allowlist does not contain,
 a URL whose host is not allowed for that group, a tracked VBA file outside
-every group, or an accepted finding with no note. Findings that were
-accepted but are no longer seen are reported, not failed.
+every group, an accepted finding with no note, or an accepted finding the
+group no longer shows. A stale entry must be removed from the baseline, so
+the list stays the set of findings someone has actually reviewed.
 
 olevba's "VBA Stomping" flag is never allowlisted. olevba compares the
 names and strings in the compiled p-code with the source text and stops at
@@ -258,6 +259,9 @@ def scan(baseline):
                 problems.append(f"{group}: unexpected {entry['kind']} {entry['keyword']!r} "
                                 f"in {', '.join(entry['files'])}")
         stale = sorted(accepted - set(seen))
+        for key in stale:
+            problems.append(f"{group}: accepted finding {key!r} is no longer seen; "
+                            "remove it from security/baseline.json")
         groups[group] = {"files": files, "findings": seen, "no_longer_seen": stale,
                          "mraptor": verdicts}
 
