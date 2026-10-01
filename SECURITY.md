@@ -108,8 +108,10 @@ The pinned YARA Forge release, URL and SHA-256 are in
 (`.github/workflows/update-yara-rules.yml`) takes the newest stable release,
 with the SHA-256 GitHub records for the core archive, and proposes the new pin
 in a pull request. It starts CI, Security and Malware scan on the PR branch so
-that the new rules scan the repository before review. The updater does not
-accept findings or merge the PR. Check the Malware scan run before merging it.
+that the new rules scan the repository with the new pin, and the pull request
+merges itself only once all three pass. The updater never accepts a finding:
+a new match fails the Malware scan, and the pull request waits until the
+match is reviewed.
 
 The local YARA-X rules mirror ReDim's focused checks for encoded PowerShell,
 remote execution through Windows binaries, and Office Run key persistence.
@@ -122,6 +124,16 @@ changed content. To review a new match, inspect the matched file and rule,
 verify the source of the rule, then add only that tuple and a specific reason.
 Do not bypass a scanner failure or allow an entire rule collection. Exceptions
 no longer seen fail the scan until they are removed.
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ModernJsonInVBA)
+rates the repository's security practices on every change to main and
+weekly, and publishes the result the README badge shows. Some of its checks
+do not fit this project: a single maintainer cannot have a second person
+approve every change, the release files are built locally rather than by
+CI, so they carry the scan report's SHA-256 list rather than a build
+provenance signature, and the parser is VBA, which no fuzzer can run outside
+Office. The JSONTestSuite conformance run (CONFORMANCE.md) is what exercises
+the parser on malformed input.
 
 Releases from 3.8.3 onward carry `security-report.md` and
 `security-report.json` as assets, attached by
