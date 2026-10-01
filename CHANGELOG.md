@@ -4,6 +4,14 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- OpenSSF Scorecard rates the repository's security practices on every
+  change to main and weekly, and the README shows its badge. No change to
+  the library.
+
 ## [3.8.5] - 2026-09-29
 
 ### Changed

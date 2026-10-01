@@ -6,6 +6,7 @@
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Security](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/security.yml)
 [![Malware scan](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml/badge.svg?branch=main)](https://github.com/WilliamSmithEdward/ModernJsonInVBA/actions/workflows/malware-scan.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/WilliamSmithEdward/ModernJsonInVBA/badge)](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ModernJsonInVBA)
 
 **Deterministic JSON (and CSV / XML) → Excel Tables → JSON Roundtrip**  
 \
