@@ -43,14 +43,21 @@ Follow this order; the version stamps depend on it.
    .xlsx, re-import every module, save as .xlsm) and compare sheets and
    cells before replacing the workbook. Also run the four
    `pyvbaanalysis` commands from `.github/workflows/ci.yml`.
-6. **Commit, tag, release.** Tag `vx.y.z`, push commit and tag, then
-   `gh release create vx.y.z` with BOTH `dist/*.bas` files attached as
-   assets. Confirm new test files actually appear in the staged list
-   (`A Tests/...`) before pushing. Publishing the release triggers
-   `.github/workflows/release-security-report.yml`, which rescans the tag,
-   checks the report's hashes against the release's `.bas` files, and
-   attaches `security-report.md` and `security-report.json`; check they
-   appear on the release.
+6. **Merge, dry-run, tag.** Commit the changelog, the stamped sources, the
+   rebuilt `dist/` and the synced workbook, and confirm new test files
+   actually appear in the staged list (`A Tests/...`). Merge the pull
+   request to `main`. Optionally dry-run the release:
+   `gh workflow run publish.yml --ref main`, then
+   `gh run download <run-id> -n release-preview`. The owner then tags the
+   merged commit: `git tag vx.y.z && git push origin vx.y.z`. The tag runs
+   `.github/workflows/publish.yml`: it refuses a tag that is not the top
+   CHANGELOG version, reruns `build_dist.py` and fails if the committed
+   `dist/` differs, runs Security and Malware scan, checks the combined
+   report's hashes against the files it built, signs their build
+   provenance, and creates the release with both `dist/*.bas` files,
+   `ModernJsonInVBA-x.y.z.sigstore.json`, `security-report.md` and
+   `security-report.json`, with the CHANGELOG section as its notes. The
+   workbook is not attached. Do not create the release by hand.
 
 ## Project constraints
 
@@ -83,7 +90,7 @@ Follow this order; the version stamps depend on it.
 
 These rules are the same in every WilliamSmithEdward repository.
 
-- **How a release happens here:** publishing a GitHub release starts the release reports, which scan it and attach their reports to it. Any other step, such as a marketplace upload, is described elsewhere in this file.
+- **How a release happens here:** pushing a `vX.Y.Z` tag runs Publish, which builds the release files in CI and creates the GitHub release with them, their signed provenance and the security reports. Any other step, such as a marketplace upload, is described elsewhere in this file.
 - **Starting a workflow by hand never releases anything.** Publish and every
   release report are dry runs when started with `gh workflow run` or the Run
   workflow button. They build, scan and assemble the release files exactly

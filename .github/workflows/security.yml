@@ -2,8 +2,8 @@ name: Security
 
 # olevba and mraptor scan every VBA file. Runs daily, on pushes and pull
 # requests. ClamAV and YARA-X run in malware-scan.yml.
-# release-security-report.yml runs both when a release is published and
-# attaches the combined report. See SECURITY.md.
+# publish.yml runs both on a release tag and attaches the combined report to
+# the release. See SECURITY.md.
 # zizmor audits the workflows themselves and keeps its own exceptions (see its job).
 
 on:

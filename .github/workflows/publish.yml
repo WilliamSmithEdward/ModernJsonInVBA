@@ -1,0 +1,267 @@
+name: Publish
+
+# A v*.*.* tag releases the library. The build job regenerates dist/ with
+# build_dist.py on the tagged commit, refuses a tag that is not the version of
+# the top release entry in CHANGELOG.md, and fails if the committed dist/
+# files differ from what it built. Security and Malware scan run on that
+# commit, the report job merges their results into one security report and
+# checks its SHA-256 list against the built files, and this workflow then
+# signs the files' build provenance and creates the GitHub release with the
+# two .bas builds, the signed bundle and the report. The workbook is not a
+# release file.
+#
+# Started by hand, this is always a dry run: it builds, scans and assembles
+# the release files exactly as a release would, and uploads them as the
+# release-preview artifact instead of signing or releasing anything.
+
+"on":
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the release files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.15"
+
+      # The version and date build_dist.py stamps come from the top
+      # `## [x.y.z] - YYYY-MM-DD` entry in CHANGELOG.md, so the tag must name it.
+      - name: Check the tag is the CHANGELOG version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=$(python -c "import build_dist; print(build_dist.read_release_info()[0])")
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not v$VERSION, the top release entry in CHANGELOG.md."
+            exit 1
+          fi
+          echo "Tag matches CHANGELOG.md: $VERSION"
+
+      - name: Build dist/
+        run: python build_dist.py
+
+      # build_dist.py is idempotent, so a clean tree proves the committed
+      # files are exactly the ones CI built.
+      - name: Check the committed files match the build
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }
+
+      - name: Keep the built files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: dist/*.bas
+          if-no-files-found: error
+
+  security:
+    name: Security
+    uses: ./.github/workflows/security.yml
+    # The called workflow's zizmor job uploads SARIF to code scanning.
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      label: ${{ github.ref_name }}
+
+  malware-scan:
+    name: Malware scan
+    uses: ./.github/workflows/malware-scan.yml
+    permissions:
+      contents: read
+
+  report:
+    name: Security report
+    needs: [build, security, malware-scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.15"
+
+      - name: Install oletools
+        run: python -m pip install --require-hashes -r .github/requirements/security.txt
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: malware-results-*
+          path: malware-results
+          merge-multiple: true
+
+      - name: Download the built files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: built/
+
+      - name: Write the combined report
+        env:
+          LABEL: ${{ github.ref_name }}
+        run: >
+          python security/scan.py --out security-report --label "$LABEL"
+          --malware-results malware-results/malware-results-clamav.json
+          --malware-results malware-results/malware-results-yara-x.json
+
+      # The report hashes dist/*.bas in this checkout; each must equal the
+      # file the build job made, and every built file must be in the report.
+      - name: Check the report's hashes against the built files
+        run: |
+          report=security-report/security-report.json
+          bad=0
+          count=0
+          for file in built/*.bas; do
+            name=$(basename "$file")
+            want=$(jq -r --arg k "dist/$name" '.release_files[$k] // ""' "$report")
+            got=$(sha256sum "$file" | cut -d' ' -f1)
+            echo "$name: report ${want:-missing} built $got"
+            [ "$want" = "$got" ] || bad=1
+            count=$((count + 1))
+          done
+          listed=$(jq '[.release_files | keys[] | select(startswith("dist/"))] | length' "$report")
+          if [ "$count" -eq 0 ] || [ "$count" -ne "$listed" ]; then
+            echo "::error::Built $count .bas files; the report lists $listed."
+            bad=1
+          fi
+          exit "$bad"
+
+      - name: Keep the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-report
+          path: |
+            security-report/security-report.md
+            security-report/security-report.json
+          if-no-files-found: error
+
+  publish:
+    name: Attest the release files
+    needs: [build, security, malware-scan, report]
+    if: ${{ startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write # sign the attestation
+      attestations: write # store it
+    steps:
+      - name: Download the built files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: built/
+
+      # Signed build provenance: `gh attestation verify <file> --repo
+      # WilliamSmithEdward/ModernJsonInVBA` shows which commit and run built
+      # the file.
+      - name: Attest the release files
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: built/*.bas
+
+      # The signed bundle goes on the GitHub release too, so a download can be
+      # checked offline: gh attestation verify <file> --bundle <bundle>.
+      - name: Keep the provenance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provenance
+          path: ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+
+  # On a dry run `publish` is skipped; this job still assembles the release
+  # and uploads it as an artifact, and only the last step is skipped.
+  github-release:
+    name: Create GitHub release
+    needs: [build, security, malware-scan, report, publish]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success'
+      && needs.security.result == 'success' && needs.malware-scan.result == 'success'
+      && needs.report.result == 'success'
+      && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the built files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release/
+
+      - name: Download the security report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-report
+          path: release/
+
+      - name: Download the provenance bundle
+        if: env.DRY_RUN != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: provenance
+          path: provenance/
+
+      # On a real run the build job has already checked the tag against this
+      # version; on a dry run it is the version the next tag would carry.
+      - name: Name the bundle and extract the release notes
+        run: |
+          VERSION=$(python3 -c "import build_dist; print(build_dist.read_release_info()[0])")
+          if [ "$DRY_RUN" != true ]; then
+            test "$(find provenance -type f | wc -l)" = 1
+            mv provenance/* "release/ModernJsonInVBA-$VERSION.sigstore.json"
+          fi
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { capture=1; next }
+            capture && /^## \[/ { exit }
+            capture && /^\[[^]]+\]: / { exit }
+            capture { print }
+          ' CHANGELOG.md > release_notes.md
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION."
+            exit 1
+          fi
+          ls -l release
+
+      - name: Keep what the release would carry
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-preview
+          path: |
+            release/
+            release_notes.md
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          # The title is the tag and nothing else. The headline is in the body.
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: release/*
+          fail_on_unmatched_files: true
