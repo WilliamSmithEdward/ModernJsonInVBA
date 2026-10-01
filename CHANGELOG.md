@@ -17,6 +17,9 @@ All notable changes to ModernJsonInVBA are recorded here. The format follows
 - The olevba and mraptor scan fails when an accepted finding in
   `security/baseline.json` is no longer seen, naming the entry and its
   group. It used to report the entry and pass. No change to the library.
+- Releases are built, scanned and signed in CI from the pushed tag, and
+  carry signed build provenance for the two `.bas` files. No change to the
+  library.
 
 ## [3.8.5] - 2026-09-29
 

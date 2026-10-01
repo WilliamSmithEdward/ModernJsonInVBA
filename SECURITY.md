@@ -82,7 +82,7 @@ their gates decide whether a change can merge: **CI passed**,
 **Security passed** and **Malware scan passed**. A gate passes only when
 every job before it did, and any unexpected finding fails it, whatever its
 severity. Security and Malware scan also run daily at 08:17 UTC, and again
-on the tagged commit when a release is published.
+on the tagged commit when a release tag is pushed.
 
 - **Code:** olevba and mraptor, from oletools, scan every VBA file in three
   groups: the library (`vba_source/`, `dist/`), the tests (`Tests/`,
@@ -113,12 +113,11 @@ on the tagged commit when a release is published.
 - **OpenSSF Scorecard** rates the repository's security practices on every
   change to `main` and weekly, and the README badge shows the result.
   Some of its checks do not fit this project. A single maintainer cannot
-  have a second person approve every change. The release files are built
-  locally rather than by CI, so they carry the scan report's SHA-256 list
-  rather than a build provenance signature. Fuzzing does not apply: the
-  parser is VBA, which runs only inside Office. The JSONTestSuite
-  conformance run (CONFORMANCE.md) exercises the parser on malformed input
-  instead.
+  have a second person approve every change. Signed-Releases rises as
+  releases carry the provenance bundle; it counts the last five. Fuzzing
+  does not apply: the parser is VBA, which runs only inside Office. The
+  JSONTestSuite conformance run (CONFORMANCE.md) exercises the parser on
+  malformed input instead.
 
 ### The VBA stomping check
 
@@ -182,10 +181,12 @@ line they excuse, each with its reason.
 
 Current entries:
 
-- zizmor: one rule is turned off in `.github/zizmor.yml`,
-  `self-repository`, which asks for GitHub's `$/` syntax in `uses:`. It
-  comes back once GitHub's documentation confirms that syntax for called
-  reusable workflows. There are no inline exceptions.
+- zizmor: two rules are turned off in `.github/zizmor.yml`.
+  `self-repository` asks for GitHub's `$/` syntax in `uses:`; it comes
+  back once GitHub's documentation confirms that syntax for called reusable
+  workflows. `superfluous-actions` asks for `gh release create` in place of
+  the release action in `publish.yml`; the release path changes only after
+  it can be dry-run. There are no inline exceptions.
 - Baseline: 20 findings in the library, 24 in the tests, and 35 in the
   workbook. Most are ordinary words in code and comments, such as "open"
   in "open-addressing". Allowed hosts are github.com for the library,
@@ -218,24 +219,42 @@ and Malware scan pass; a third-party major version waits for review.
 
 ## Releases
 
-A release is built locally: `build_dist.py` stamps the version and
-generates `dist/` from `vba_source/`, and the GitHub release carries the
-two `.bas` builds. The workbook is not a release file; get it from the
-repository at the release tag.
+Pushing a `vX.Y.Z` tag runs `.github/workflows/publish.yml`. It refuses a
+tag that is not the version of the top release entry in CHANGELOG.md,
+runs `build_dist.py` on the tagged commit, and fails if the `dist/` files
+committed there differ from what it built. It runs Security and Malware
+scan on that commit, merges the olevba, mraptor, ClamAV and YARA-X results
+into one report, and checks the report's SHA-256 for each `.bas` against
+the files it built. Only when all of that passes does it sign the files'
+build provenance and create the GitHub release with:
 
-Publishing the release starts `.github/workflows/release-security-report.yml`.
-It runs Security and Malware scan on the tagged commit, merges the olevba,
-mraptor, ClamAV and YARA-X results into one report, checks the report's
-SHA-256 for each `.bas` against the release's own `.bas` files, and
-attaches `security-report.md` and `security-report.json` to the release.
-Releases from 3.8.3 on carry them. Started by hand, the workflow is a dry
-run and attaches nothing.
+- `ModernJsonInVBA_Excel.bas` and `ModernJsonInVBA_AllO365.bas`: the two
+  single-file builds.
+- `ModernJsonInVBA-<version>.sigstore.json`: the signed build provenance.
+- `security-report.md` and `security-report.json`: the combined scan
+  report.
+
+The release notes are the version's section of CHANGELOG.md. Started by
+hand, the workflow is a dry run: it builds, scans and assembles the same
+files and keeps them as the `release-preview` artifact, and releases
+nothing.
+
+The workbook is not a release file; get it from the repository at the
+release tag. Releases up to 3.8.5 were built locally and carry no
+provenance; releases from 3.8.3 on carry the security report.
 
 ### Verifying a download
 
-The report lists every finding with its explanation and the SHA-256 of
-each `.bas` build and of the workbook at the tag. Compare a download with
-it:
+To check that a `.bas` was built by this repository's Publish workflow
+from a tagged commit:
+
+```bash
+gh attestation verify ModernJsonInVBA_Excel.bas --repo WilliamSmithEdward/ModernJsonInVBA
+```
+
+The report also lists every finding with its explanation and the SHA-256
+of each `.bas` build and of the workbook at the tag. Compare a download
+with it:
 
 ```powershell
 Get-FileHash .\ModernJsonInVBA_Excel.bas -Algorithm SHA256

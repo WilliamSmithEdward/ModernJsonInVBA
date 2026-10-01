@@ -240,6 +240,8 @@ pass to `Json_ReadTextFile`. Every push and release is scanned with olevba,
 mraptor, ClamAV, and YARA-X against reviewed findings and exceptions.
 Starting with the release after 3.8.2, each
 release carries the scan report and the SHA-256 of every release file.
+Releases after 3.8.5 are built in CI from the release tag and carry
+signed build provenance.
 
 One behavior matters for untrusted input: by default a JSON string that
 begins with `=` is written to Excel as a live formula. Pass
@@ -307,7 +309,8 @@ working as-is.
 
 ### Option 4: Use the provided workbook
 
-1.  Download `ModernJsonInVBA.xlsm`
+1.  Download `ModernJsonInVBA.xlsm` from the repository, at the release tag
+    you want. Releases attach only the `.bas` files, not the workbook.
 2.  Open the file and enable macros
 
 You may export or import the modules into another workbook if needed.
