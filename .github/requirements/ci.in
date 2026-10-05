@@ -3,4 +3,4 @@
 #   uv pip compile ci.in --universal --generate-hashes --python-version 3.13 -o ci.txt
 # Dependabot proposes each new release.
 pyvbaanalysis==2.3.1
-pyopenvba==6.3.5
+pyopenvba==6.5.0
