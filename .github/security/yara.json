@@ -1,8 +1,8 @@
 {
   "yara_forge": {
-    "release": "20261004",
+    "release": "20261011",
     "asset": "yara-forge-rules-core.zip",
-    "url": "https://github.com/YARAHQ/yara-forge/releases/download/20261004/yara-forge-rules-core.zip",
-    "sha256": "0b548dff76139b7a041d20923ccfddfa614db6b6ee8710c181ff037a753ffe69"
+    "url": "https://github.com/YARAHQ/yara-forge/releases/download/20261011/yara-forge-rules-core.zip",
+    "sha256": "bf0cc68e60df44bee4e9906713160889e7c2142b14621394860a45e629035147"
   }
 }
