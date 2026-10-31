@@ -210,12 +210,15 @@ runners to named OS releases, the ClamAV image to a digest, Python tools
 SHA-256 in `.github/security/yara.json`. ClamAV's signatures change too
 often to pin, so freshclam fetches and verifies them on every run.
 
-Dependabot proposes updates to GitHub Actions, the Python lock files and
-the ClamAV image once a version is a week old (the owner's own packages,
-such as pyVBAanalysis, at once), and at once for a security advisory. The
-Update YARA rules workflow proposes new YARA pins each week. A minor or
-patch update, and the YARA pull request, merges itself once CI, Security
-and Malware scan pass; a third-party major version waits for review.
+Dependabot proposes updates to GitHub Actions and the Python lock files
+once a version is a week old (the owner's own packages, such as
+pyVBAanalysis, at once), and at once for a security advisory. The Update
+YARA rules workflow proposes new YARA pins each week, and the Update
+images workflow a new ClamAV image once it is a week old, a version
+rebuilt in place included (GitHub refuses Dependabot's updates of that
+image). A minor or patch update, and the YARA and image pull requests,
+merge themselves once CI, Security and Malware scan pass; a third-party
+major version waits for review.
 
 ## Releases
 

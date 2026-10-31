@@ -24,15 +24,3 @@ updates:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
-
-  # The ClamAV engine the malware scan runs, pinned by digest.
-  - package-ecosystem: docker
-    directory: /.github/security/clamav
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    groups:
-      minor-and-patch:
-        patterns: ["*"]
-        update-types: [minor, patch]
