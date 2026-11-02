@@ -4,9 +4,9 @@ defusedxml==0.7.1 \
     --hash=sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69 \
     --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61
     # via pyvbaanalysis
-pyopenvba==6.5.0 \
-    --hash=sha256:5151e147bf5723ea9dbe75a8670e19ef4e3295156b78a84fb01eab8dea16bb27 \
-    --hash=sha256:f83fbd2d5952bd05408bc4d123f0e0bf0b775f951cdce0913aecf306ba3fa7e5
+pyopenvba==6.6.0 \
+    --hash=sha256:3c1f370d21f0c57d1f11a69d78896209a14b32da389e7c12b88016ff809b6a47 \
+    --hash=sha256:8c8617f9ffa01002d658efbf10ce6e98d86a521af113101a4ae6653d61b099a5
     # via
     #   -r ci.in
     #   pyvbaanalysis
