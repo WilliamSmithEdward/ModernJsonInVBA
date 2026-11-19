@@ -10,7 +10,7 @@ pyopenvba==6.6.0 \
     # via
     #   -r ci.in
     #   pyvbaanalysis
-pyvbaanalysis==3.0.2 \
-    --hash=sha256:98473ab07beeb0e179bf3a40058ed611af7e00f96d3e1e9fe27056fdceabed22 \
-    --hash=sha256:d91116510b44f3259f619a9be0a175e7cfa204f157aa7fa6695eff67f8ceef37
+pyvbaanalysis==3.0.3 \
+    --hash=sha256:3c0098bb6c3e6f1257d8080038cca4c36c2a54976f0e4d6cbc54914e993752d3 \
+    --hash=sha256:eea2b828ca2163ee461e3476dae2276fe410b09bafe3a7a9b3870edf52f91812
     # via -r ci.in
